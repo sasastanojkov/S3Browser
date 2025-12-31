@@ -1,0 +1,85 @@
+<Window x:Class="S3Browser.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:S3Browser"
+        mc:Ignorable="d"
+        Title="S3 Browser" Height="450" Width="800">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" 
+                   x:Name="TitleTextBlock"
+                   Text="AWS S3 Buckets" 
+                   FontSize="18" FontWeight="Bold" 
+                   Margin="10" HorizontalAlignment="Center"/>
+
+        <Grid Grid.Row="1" Margin="10,0,10,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" 
+                       Text="S3 Path:" 
+                       VerticalAlignment="Center" 
+                       Margin="0,0,10,0"/>
+            
+            <TextBox Grid.Column="1" 
+                     x:Name="S3PathTextBox"
+                     VerticalAlignment="Center"
+                     Padding="5"
+                     FontSize="12"
+                     ToolTip="Enter S3 path (e.g., s3://bucket-name/path/to/folder) or view current location"
+                     KeyDown="S3PathTextBox_KeyDown"/>
+            
+            <Button Grid.Column="2" 
+                    Content="Go" 
+                    Width="60" 
+                    Height="28"
+                    Margin="10,0,0,0"
+                    Click="GoButton_Click"/>
+        </Grid>
+
+        <Button Grid.Row="2"
+                x:Name="ReadAllParquetButton"
+                Content="📊 Read All Parquet Files in Folder"
+                Height="35"
+                Margin="10,0,10,10"
+                FontSize="13"
+                FontWeight="SemiBold"
+                Background="#FF4CAF50"
+                Foreground="White"
+                BorderThickness="0"
+                Visibility="Collapsed"
+                Click="ReadAllParquetButton_Click"
+                ToolTip="Query all .parquet files in this folder using DuckDB wildcard"/>
+
+        <DataGrid Grid.Row="3" 
+                  x:Name="FilesDataGrid"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  SelectionMode="Single"
+                  GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column"
+                  CanUserResizeRows="False"
+                  CanUserSortColumns="True"
+                  MouseDoubleClick="FilesDataGrid_MouseDoubleClick"
+                  PreviewKeyDown="FilesDataGrid_KeyDown"
+                  Margin="10">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="80"/>
+                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
+                <DataGridTextColumn Header="Size" Binding="{Binding Size}" Width="120"/>
+                <DataGridTextColumn Header="Last Modified" Binding="{Binding LastModified}" Width="150"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</Window>
