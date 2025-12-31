@@ -556,6 +556,7 @@ namespace S3Browser
             if (fileItems.Count == 0)
             {
                 ReadAllParquetButton.Visibility = Visibility.Collapsed;
+                WriteQueryButton.Visibility = Visibility.Collapsed;
                 return;
             }
 
@@ -570,10 +571,12 @@ namespace S3Browser
             if (allParquetOrSuccess && hasParquetFiles)
             {
                 ReadAllParquetButton.Visibility = Visibility.Visible;
+                WriteQueryButton.Visibility = Visibility.Visible;
             }
             else
             {
                 ReadAllParquetButton.Visibility = Visibility.Collapsed;
+                WriteQueryButton.Visibility = Visibility.Collapsed;
             }
         }
 
@@ -601,6 +604,39 @@ namespace S3Browser
             catch (Exception ex)
             {
                 MessageBox.Show($"Error opening parquet viewer: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void WriteQueryButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_s3Client == null || _currentBucket == null)
+                    return;
+
+                // Create a wildcard pattern for all parquet files in the current prefix
+                string wildcardPattern = string.IsNullOrEmpty(_currentPrefix)
+                    ? "*.parquet"
+                    : $"{_currentPrefix.TrimEnd('/')}/*.parquet";
+
+                string s3Path = $"s3://{_currentBucket}/{wildcardPattern.Replace("*.parquet", "")}*.parquet";
+
+                // Generate initial query
+                string initialQuery = $"SELECT * FROM read_parquet('{s3Path}')";
+
+                // Extract folder name for window title
+                string folderName = string.IsNullOrEmpty(_currentPrefix)
+                    ? _currentBucket
+                    : _currentPrefix.TrimEnd('/').Split('/').Last();
+
+                // Open query editor dialog
+                var queryDialog = new QueryEditorDialog(_s3Client, _currentBucket, initialQuery, folderName, _awsProfile);
+                queryDialog.Show();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening query editor: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }

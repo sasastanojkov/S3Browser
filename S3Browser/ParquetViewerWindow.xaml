@@ -28,6 +28,8 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0" Orientation="Horizontal">
@@ -47,6 +49,18 @@
             </StackPanel>
 
             <Button Grid.Column="2"
+                    x:Name="EditQueryButton"
+                    Content="Edit Query"
+                    Width="120"
+                    Height="30"
+                    Background="#FF2196F3"
+                    Foreground="White"
+                    BorderThickness="0"
+                    FontWeight="SemiBold"
+                    Click="EditQueryButton_Click"
+                    ToolTip="Edit and re-execute the current query"/>
+
+            <Button Grid.Column="4"
                     Content="Reload"
                     Width="100"
                     Height="30"

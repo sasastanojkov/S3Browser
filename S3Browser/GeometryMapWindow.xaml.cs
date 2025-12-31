@@ -627,7 +627,10 @@ namespace S3Browser
         {
             if (sender is System.Windows.Controls.Button button && button.Tag is string columnName)
             {
-                // Update button styles - reset all buttons to normal
+                // Check if this button is already selected (highlighted)
+                bool isAlreadySelected = button.Background == System.Windows.Media.Brushes.LightYellow;
+
+                // Reset all buttons to normal
                 foreach (var child in GeometryButtonsPanel.Children)
                 {
                     if (child is System.Windows.Controls.Button btn)
@@ -639,14 +642,34 @@ namespace S3Browser
                     }
                 }
 
-                // Highlight the clicked button
-                button.Background = System.Windows.Media.Brushes.LightYellow;
-                button.BorderBrush = System.Windows.Media.Brushes.Orange;
-                button.BorderThickness = new Thickness(2);
-                button.FontWeight = FontWeights.Bold;
+                // If button was already selected, deselect it (toggle off)
+                if (isAlreadySelected)
+                {
+                    // Return all geometries to normal style
+                    if (_currentHighlightedFeature != null)
+                    {
+                        if (_featureStyles.TryGetValue(_currentHighlightedFeature, out var styles))
+                        {
+                            var stylesList = (List<IStyle>)_currentHighlightedFeature.Styles;
+                            stylesList.Clear();
+                            stylesList.Add(styles.normalStyle);
+                        }
+                        _currentHighlightedFeature = null;
+                    }
+                }
+                else
+                {
+                    // Button was not selected, so highlight it
+                    button.Background = System.Windows.Media.Brushes.LightYellow;
+                    button.BorderBrush = System.Windows.Media.Brushes.Orange;
+                    button.BorderThickness = new Thickness(2);
+                    button.FontWeight = FontWeights.Bold;
 
-                // Highlight the corresponding geometry
-                HighlightGeometryByColumnName(columnName);
+                    // Highlight the corresponding geometry
+                    HighlightGeometryByColumnName(columnName);
+                }
+
+                MapCanvas.InvalidateVisual();
             }
         }
     }

@@ -92,11 +92,14 @@ namespace S3Browser
         private readonly string _fileName;
         private readonly bool _isWildcard;
         private readonly string? _awsProfile;
+        private string? _customQuery;
+        private string? _lastExecutedQuery;
         private DuckDBConnection? _duckDbConnection;
         private CancellationTokenSource? _cancellationTokenSource;
         private List<string> _geometryWktList = new();
         private Dictionary<int, List<GeometryMapWindow.GeometryInfo>> _rowGeometries = new(); // Map row index to geometries with column info
         private GeometryMapWindow? _currentMapWindow;
+        private int _lastSelectedRowIndex = -1; // Track the last selected row for toggle behavior
 
         /// <summary>
         /// Initializes a new instance of the ParquetViewerWindow.
@@ -107,7 +110,8 @@ namespace S3Browser
         /// <param name="fileName">Display name for the file or folder.</param>
         /// <param name="isWildcard">True if key is a wildcard pattern (e.g., "*.parquet"); false for single file.</param>
         /// <param name="awsProfile">AWS profile name for credential resolution. Can be null.</param>
-        public ParquetViewerWindow(IAmazonS3 s3Client, string bucketName, string key, string fileName, bool isWildcard = false, string? awsProfile = null)
+        /// <param name="customQuery">Optional custom SQL query to execute instead of default query.</param>
+        public ParquetViewerWindow(IAmazonS3 s3Client, string bucketName, string key, string fileName, bool isWildcard = false, string? awsProfile = null, string? customQuery = null)
         {
             InitializeComponent();
 
@@ -117,6 +121,7 @@ namespace S3Browser
             _fileName = fileName;
             _isWildcard = isWildcard;
             _awsProfile = awsProfile;
+            _customQuery = customQuery;
 
             // Subscribe to row selection changes
             ResultsDataGrid.SelectionChanged += ResultsDataGrid_SelectionChanged;
@@ -124,7 +129,12 @@ namespace S3Browser
             // Create a dedicated DuckDB connection for this window with S3 access
             InitializeDuckDbConnectionAsync();
 
-            if (_isWildcard)
+            if (!string.IsNullOrEmpty(_customQuery))
+            {
+                FileNameTextBlock.Text = $"Custom Query: {fileName}";
+                Title = $"Query: {fileName}";
+            }
+            else if (_isWildcard)
             {
                 FileNameTextBlock.Text = $"Parquet Files in: {fileName}";
                 Title = $"{fileName}/*";
@@ -217,28 +227,57 @@ namespace S3Browser
                 LoadingMessageTextBlock.Text = "Preparing S3 query...";
                 StatusTextBlock.Text = "Querying S3...";
 
-                string s3Path;
+                string queryToExecute;
 
-                if (_isWildcard)
+                if (!string.IsNullOrEmpty(_customQuery))
                 {
-                    // Use S3 wildcard pattern directly
-                    var prefix = _key.Replace("*.parquet", "");
-                    s3Path = $"s3://{_bucketName}/{prefix}*.parquet";
+                    // Use custom query provided by user
+                    LoadingMessageTextBlock.Text = "Executing custom query...";
+                    StatusTextBlock.Text = "Running custom query...";
 
-                    LoadingMessageTextBlock.Text = "Querying parquet files from S3...";
+                    // Apply row limit to custom query if specified
+                    queryToExecute = _customQuery.Trim();
+                    if (rowLimit != -1)
+                    {
+                        // Check if query already has LIMIT clause
+                        if (!queryToExecute.Contains("LIMIT", StringComparison.OrdinalIgnoreCase))
+                        {
+                            queryToExecute += $" LIMIT {rowLimit}";
+                        }
+                    }
                 }
                 else
                 {
-                    // Use direct S3 path
-                    s3Path = $"s3://{_bucketName}/{_key}";
-                    LoadingMessageTextBlock.Text = "Querying parquet file from S3...";
+                    string s3Path;
+
+                    if (_isWildcard)
+                    {
+                        // Use S3 wildcard pattern directly
+                        var prefix = _key.Replace("*.parquet", "");
+                        s3Path = $"s3://{_bucketName}/{prefix}*.parquet";
+
+                        LoadingMessageTextBlock.Text = "Querying parquet files from S3...";
+                    }
+                    else
+                    {
+                        // Use direct S3 path
+                        s3Path = $"s3://{_bucketName}/{_key}";
+                        LoadingMessageTextBlock.Text = "Querying parquet file from S3...";
+                    }
+
+                    LoadingMessageTextBlock.Text = "Executing query...";
+                    StatusTextBlock.Text = "Querying parquet file(s)...";
+
+                    queryToExecute = rowLimit == -1
+                        ? $"SELECT * FROM read_parquet('{s3Path}')"
+                        : $"SELECT * FROM read_parquet('{s3Path}') LIMIT {rowLimit}";
                 }
 
-                LoadingMessageTextBlock.Text = "Executing query...";
-                StatusTextBlock.Text = "Querying parquet file(s)...";
+                // Store the query that will be executed
+                _lastExecutedQuery = queryToExecute;
 
                 // Execute query on background thread to keep UI responsive
-                var result = await Task.Run(() => ExecuteQuery(s3Path, rowLimit, cancellationToken), cancellationToken);
+                var result = await Task.Run(() => ExecuteQuery(queryToExecute, cancellationToken), cancellationToken);
 
                 // Update UI on UI thread
                 if (result != null)
@@ -254,7 +293,11 @@ namespace S3Browser
                     ResultsDataGrid.ItemsSource = result.DefaultView;
 
                     int rowCount = result.Rows.Count;
-                    if (rowLimit == -1)
+                    if (!string.IsNullOrEmpty(_customQuery))
+                    {
+                        StatusTextBlock.Text = $"Query executed successfully: {rowCount:N0} rows returned";
+                    }
+                    else if (rowLimit == -1)
                     {
                         StatusTextBlock.Text = $"Loaded {rowCount:N0} rows";
                     }
@@ -273,9 +316,10 @@ namespace S3Browser
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error loading parquet file: {ex.Message}", "Error",
+                string errorMessage = $"Error executing query: {ex.Message}";
+                MessageBox.Show(errorMessage, "Query Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
-                StatusTextBlock.Text = "Error loading file";
+                StatusTextBlock.Text = "Query execution failed";
             }
             finally
             {
@@ -285,7 +329,7 @@ namespace S3Browser
             }
         }
 
-        private DataTable? ExecuteQuery(string s3Path, int rowLimit, CancellationToken cancellationToken)
+        private DataTable? ExecuteQuery(string query, CancellationToken cancellationToken)
         {
             // This runs on a background thread
             try
@@ -297,10 +341,6 @@ namespace S3Browser
                 {
                     throw new InvalidOperationException("DuckDB connection is not initialized.");
                 }
-
-                string query = rowLimit == -1
-                    ? $"SELECT * FROM read_parquet('{s3Path}')"
-                    : $"SELECT * FROM read_parquet('{s3Path}') LIMIT {rowLimit}";
 
                 using (var command = _duckDbConnection.CreateCommand())
                 {
@@ -388,6 +428,72 @@ namespace S3Browser
             LoadParquetDataAsync();
         }
 
+        private void EditQueryButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Get the last executed query or generate a default one
+                string? queryToEdit = _lastExecutedQuery;
+
+                if (string.IsNullOrEmpty(queryToEdit))
+                {
+                    // Generate default query if none was executed yet
+                    if (!string.IsNullOrEmpty(_customQuery))
+                    {
+                        queryToEdit = _customQuery;
+                    }
+                    else if (_isWildcard)
+                    {
+                        var prefix = _key.Replace("*.parquet", "");
+                        string s3Path = $"s3://{_bucketName}/{prefix}*.parquet";
+                        queryToEdit = $"SELECT * FROM read_parquet('{s3Path}')";
+                    }
+                    else
+                    {
+                        string s3Path = $"s3://{_bucketName}/{_key}";
+                        queryToEdit = $"SELECT * FROM read_parquet('{s3Path}')";
+                    }
+                }
+
+                // Open query editor dialog with the current query
+                var queryDialog = new QueryEditorDialog(
+                    _s3Client,
+                    _bucketName,
+                    queryToEdit,
+                    _fileName,
+                    _awsProfile,
+                    this); // Pass reference to this window for re-execution
+
+                queryDialog.Show();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening query editor: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Executes a new custom query in this window, replacing the current results.
+        /// Called from QueryEditorDialog when user modifies and re-executes a query.
+        /// </summary>
+        /// <param name="newQuery">The SQL query to execute.</param>
+        public void ExecuteNewQuery(string newQuery)
+        {
+            // Update the custom query field
+            _customQuery = newQuery;
+
+            // Reload data with the new query
+            LoadParquetDataAsync();
+
+            // Bring window to front
+            if (WindowState == WindowState.Minimized)
+            {
+                WindowState = WindowState.Normal;
+            }
+            Activate();
+        }
+
         private void CloseButton_Click(object sender, RoutedEventArgs e)
         {
             Close();
@@ -397,6 +503,25 @@ namespace S3Browser
         {
             // Get selected row index
             var selectedIndex = ResultsDataGrid.SelectedIndex;
+
+            // Check if user clicked on the same row again (toggle behavior)
+            if (selectedIndex == _lastSelectedRowIndex && selectedIndex >= 0)
+            {
+                // Deselect the row
+                ResultsDataGrid.SelectedIndex = -1;
+                _lastSelectedRowIndex = -1;
+
+                // Close map window
+                if (_currentMapWindow != null)
+                {
+                    _currentMapWindow.Close();
+                    _currentMapWindow = null;
+                }
+                return;
+            }
+
+            // Update last selected row
+            _lastSelectedRowIndex = selectedIndex;
 
             if (selectedIndex < 0)
             {
@@ -430,6 +555,8 @@ namespace S3Browser
                             if (_currentMapWindow == s)
                             {
                                 _currentMapWindow = null;
+                                _lastSelectedRowIndex = -1; // Reset selection tracking when map closes
+                                ResultsDataGrid.SelectedIndex = -1; // Deselect row when map closes
                             }
                         };
                     }
@@ -508,11 +635,14 @@ namespace S3Browser
                     var geometry = wktReader.Read(wkt);
                     if (geometry != null && !geometry.IsEmpty)
                     {
+                        var geoJsonString = geoJsonWriter.Write(geometry);
+                        var geometryObject = System.Text.Json.JsonSerializer.Deserialize<object>(geoJsonString);
+
                         var feature = new
                         {
                             type = "Feature",
                             id = index++,
-                            geometry = System.Text.Json.JsonSerializer.Deserialize<object>(geoJsonWriter.Write(geometry)),
+                            geometry = geometryObject ?? new { },
                             properties = new { wkt = wkt }
                         };
                         features.Add(feature);

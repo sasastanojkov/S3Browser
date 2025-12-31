@@ -48,19 +48,39 @@
                     Click="GoButton_Click"/>
         </Grid>
 
-        <Button Grid.Row="2"
-                x:Name="ReadAllParquetButton"
-                Content="📊 Read All Parquet Files in Folder"
-                Height="35"
-                Margin="10,0,10,10"
-                FontSize="13"
-                FontWeight="SemiBold"
-                Background="#FF4CAF50"
-                Foreground="White"
-                BorderThickness="0"
-                Visibility="Collapsed"
-                Click="ReadAllParquetButton_Click"
-                ToolTip="Query all .parquet files in this folder using DuckDB wildcard"/>
+        <Grid Grid.Row="2" Margin="10,0,10,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0"
+                    x:Name="ReadAllParquetButton"
+                    Content="📊 Read All Parquet Files"
+                    Height="35"
+                    FontSize="13"
+                    FontWeight="SemiBold"
+                    Background="#FF4CAF50"
+                    Foreground="White"
+                    BorderThickness="0"
+                    Visibility="Collapsed"
+                    Click="ReadAllParquetButton_Click"
+                    ToolTip="Query all .parquet files in this folder using DuckDB wildcard"/>
+
+            <Button Grid.Column="2"
+                    x:Name="WriteQueryButton"
+                    Content="✏️ Write Custom Query"
+                    Height="35"
+                    FontSize="13"
+                    FontWeight="SemiBold"
+                    Background="#FF2196F3"
+                    Foreground="White"
+                    BorderThickness="0"
+                    Visibility="Collapsed"
+                    Click="WriteQueryButton_Click"
+                    ToolTip="Write and execute a custom SQL query against parquet files"/>
+        </Grid>
 
         <DataGrid Grid.Row="3" 
                   x:Name="FilesDataGrid"
