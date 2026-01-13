@@ -12,6 +12,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" 
@@ -37,7 +38,7 @@
                      VerticalAlignment="Center"
                      Padding="5"
                      FontSize="12"
-                     ToolTip="Enter S3 path (e.g., s3://bucket-name/path/to/folder) or view current location"
+                     ToolTip="Enter S3 path (e.g., s3://bucket-name/path/to/folder). Works with both private and public buckets."
                      KeyDown="S3PathTextBox_KeyDown"/>
             
             <Button Grid.Column="2" 
@@ -101,5 +102,42 @@
                 <DataGridTextColumn Header="Last Modified" Binding="{Binding LastModified}" Width="150"/>
             </DataGrid.Columns>
         </DataGrid>
+
+        <!-- Status Bar -->
+        <StatusBar Grid.Row="4" Height="25" Background="#FFF0F0F0">
+            <StatusBar.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                    </Grid>
+                </ItemsPanelTemplate>
+            </StatusBar.ItemsPanel>
+
+            <StatusBarItem Grid.Column="0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="StatusTextBlock" 
+                               Text="Ready" 
+                               Margin="5,0,10,0"
+                               VerticalAlignment="Center"/>
+                    <ProgressBar x:Name="StatusProgressBar"
+                                 Width="150"
+                                 Height="16"
+                                 IsIndeterminate="True"
+                                 Visibility="Collapsed"
+                                 VerticalAlignment="Center"/>
+                </StackPanel>
+            </StatusBarItem>
+
+            <StatusBarItem Grid.Column="2">
+                <TextBlock x:Name="ItemCountTextBlock" 
+                           Text="" 
+                           Margin="5,0,5,0"
+                           VerticalAlignment="Center"/>
+            </StatusBarItem>
+        </StatusBar>
     </Grid>
 </Window>

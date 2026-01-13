@@ -60,7 +60,7 @@ namespace S3Browser.Services
         /// <summary>
         /// Checks if the file is a text file based on its extension.
         /// Supports extensions: .txt, .json, .xml, .log, .md, .yaml, .yml, .config, .ini,
-        /// .properties, .html, .htm, .css, .js, .ts, .sql, .sh, .bat, .ps1
+        /// .properties, .html, .htm, .css, .js, .ts, .sql, .sh, .bat, .ps1.
         /// </summary>
         /// <param name="fileName">The file name to check.</param>
         /// <returns>True if the file has a recognized text file extension; otherwise, false.</returns>

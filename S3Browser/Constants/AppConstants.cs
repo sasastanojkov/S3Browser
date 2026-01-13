@@ -1,4 +1,4 @@
-namespace S3Browser.Constants
+﻿namespace S3Browser.Constants
 {
     /// <summary>
     /// Application-wide constants for consistent behavior across the S3Browser application.

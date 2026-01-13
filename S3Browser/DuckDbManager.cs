@@ -43,11 +43,11 @@ namespace S3Browser
         /// Creates a new DuckDB connection with S3 access configured using AWS credentials.
         /// Installs and loads the httpfs extension and configures S3 credentials.
         /// </summary>
-        /// <param name="credentials">AWS immutable credentials containing access key, secret key, and optional session token.</param>
+        /// <param name="credentials">AWS immutable credentials containing access key, secret key, and optional session token. Pass null for anonymous access to public buckets.</param>
         /// <param name="region">AWS region for S3 access (e.g., "us-east-1").</param>
         /// <returns>A new, configured DuckDB connection with S3 access enabled.</returns>
         /// <exception cref="InvalidOperationException">Thrown if connection configuration fails.</exception>
-        public DuckDBConnection CreateConnectionWithS3Access(ImmutableCredentials credentials, string region)
+        public DuckDBConnection CreateConnectionWithS3Access(ImmutableCredentials? credentials, string region)
         {
             lock (_lock)
             {
@@ -63,19 +63,23 @@ namespace S3Browser
                         cmd.ExecuteNonQuery();
                     }
 
-                    // Configure S3 credentials
+                    // Configure S3 region and credentials (if provided)
                     using (var cmd = connection.CreateCommand())
                     {
-                        cmd.CommandText = $@"
-                            SET s3_region='{region}';
-                            SET s3_access_key_id='{credentials.AccessKey}';
-                            SET s3_secret_access_key='{credentials.SecretKey}';
-                        ";
+                        cmd.CommandText = $"SET s3_region='{region}';";
 
-                        // Add session token if present (for temporary credentials like SSO)
-                        if (!string.IsNullOrEmpty(credentials.Token))
+                        // Only configure credentials if provided (authenticated access)
+                        if (credentials != null)
                         {
-                            cmd.CommandText += $"SET s3_session_token='{credentials.Token}';";
+                            cmd.CommandText += $@"
+                            SET s3_access_key_id='{credentials.AccessKey}';
+                            SET s3_secret_access_key='{credentials.SecretKey}';";
+
+                            // Add session token if present (for temporary credentials like SSO)
+                            if (!string.IsNullOrEmpty(credentials.Token))
+                            {
+                                cmd.CommandText += $"SET s3_session_token='{credentials.Token}';";
+                            }
                         }
 
                         cmd.ExecuteNonQuery();
@@ -85,12 +89,25 @@ namespace S3Browser
                 {
                     connection.Close();
                     connection.Dispose();
-                    throw new InvalidOperationException($"Failed to configure DuckDB for S3 access: {ex.Message}", ex);
+                    string accessType = credentials != null ? "authenticated" : "anonymous";
+                    throw new InvalidOperationException($"Failed to configure DuckDB for {accessType} S3 access: {ex.Message}", ex);
                 }
 
                 _connections.Add(connection);
                 return connection;
             }
+        }
+
+        /// <summary>
+        /// Creates a new DuckDB connection with anonymous S3 access for public buckets.
+        /// This is a convenience method that calls <see cref="CreateConnectionWithS3Access"/> with null credentials.
+        /// </summary>
+        /// <param name="region">AWS region for S3 access (e.g., "us-west-2").</param>
+        /// <returns>A new, configured DuckDB connection with anonymous S3 access enabled.</returns>
+        /// <exception cref="InvalidOperationException">Thrown if connection configuration fails.</exception>
+        public DuckDBConnection CreateConnectionWithAnonymousS3Access(string region)
+        {
+            return CreateConnectionWithS3Access(null, region);
         }
 
         /// <summary>

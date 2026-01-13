@@ -92,6 +92,7 @@ namespace S3Browser
         private readonly string _fileName;
         private readonly bool _isWildcard;
         private readonly string? _awsProfile;
+        private readonly bool _isPublicBucket;
         private string? _customQuery;
         private string? _lastExecutedQuery;
         private DuckDBConnection? _duckDbConnection;
@@ -102,7 +103,7 @@ namespace S3Browser
         private int _lastSelectedRowIndex = -1; // Track the last selected row for toggle behavior
 
         /// <summary>
-        /// Initializes a new instance of the ParquetViewerWindow.
+        /// Initializes a new instance of the <see cref="ParquetViewerWindow"/> class.
         /// </summary>
         /// <param name="s3Client">AWS S3 client for accessing S3 resources.</param>
         /// <param name="bucketName">Name of the S3 bucket containing the file(s).</param>
@@ -111,7 +112,8 @@ namespace S3Browser
         /// <param name="isWildcard">True if key is a wildcard pattern (e.g., "*.parquet"); false for single file.</param>
         /// <param name="awsProfile">AWS profile name for credential resolution. Can be null.</param>
         /// <param name="customQuery">Optional custom SQL query to execute instead of default query.</param>
-        public ParquetViewerWindow(IAmazonS3 s3Client, string bucketName, string key, string fileName, bool isWildcard = false, string? awsProfile = null, string? customQuery = null)
+        /// <param name="isPublicBucket">True if the bucket is public and should use anonymous S3 access.</param>
+        public ParquetViewerWindow(IAmazonS3 s3Client, string bucketName, string key, string fileName, bool isWildcard = false, string? awsProfile = null, string? customQuery = null, bool isPublicBucket = false)
         {
             InitializeComponent();
 
@@ -122,6 +124,7 @@ namespace S3Browser
             _isWildcard = isWildcard;
             _awsProfile = awsProfile;
             _customQuery = customQuery;
+            _isPublicBucket = isPublicBucket;
 
             // Subscribe to row selection changes
             ResultsDataGrid.SelectionChanged += ResultsDataGrid_SelectionChanged;
@@ -154,37 +157,48 @@ namespace S3Browser
                 StatusTextBlock.Text = "Initializing database connection...";
                 LoadingMessageTextBlock.Text = "Configuring S3 access...";
 
-                // Get AWS credentials using the profile chain
-                var chain = new Amazon.Runtime.CredentialManagement.CredentialProfileStoreChain();
-                Amazon.Runtime.AWSCredentials? awsCredentials = null;
+                var region = _s3Client.Config.RegionEndpoint?.SystemName ?? "us-east-1";
 
-                if (!string.IsNullOrEmpty(_awsProfile))
+                // Use the isPublicBucket flag to determine which type of connection to create
+                if (_isPublicBucket)
                 {
-                    if (!chain.TryGetAWSCredentials(_awsProfile, out awsCredentials))
-                    {
-                        throw new InvalidOperationException($"Unable to retrieve AWS credentials for profile '{_awsProfile}'.");
-                    }
+                    // Create connection for anonymous/public S3 access (no credentials)
+                    _duckDbConnection = await Task.Run(() =>
+                        DuckDbManager.Instance.CreateConnectionWithAnonymousS3Access(region));
                 }
                 else
                 {
-                    // Fallback: try to get credentials from default profile
-                    if (!chain.TryGetAWSCredentials(null, out awsCredentials))
+                    // Get AWS credentials using the profile chain for authenticated access
+                    var chain = new Amazon.Runtime.CredentialManagement.CredentialProfileStoreChain();
+                    Amazon.Runtime.AWSCredentials? awsCredentials = null;
+
+                    if (!string.IsNullOrEmpty(_awsProfile))
                     {
-                        throw new InvalidOperationException("Unable to retrieve AWS credentials from default sources.");
+                        if (!chain.TryGetAWSCredentials(_awsProfile, out awsCredentials))
+                        {
+                            throw new InvalidOperationException($"Unable to retrieve AWS credentials for profile '{_awsProfile}'.");
+                        }
                     }
+                    else
+                    {
+                        // Fallback: try to get credentials from default profile
+                        if (!chain.TryGetAWSCredentials(null, out awsCredentials))
+                        {
+                            throw new InvalidOperationException("Unable to retrieve AWS credentials from default sources.");
+                        }
+                    }
+
+                    if (awsCredentials == null)
+                    {
+                        throw new InvalidOperationException("Unable to retrieve AWS credentials.");
+                    }
+
+                    var immutableCredentials = await awsCredentials.GetCredentialsAsync();
+
+                    // Create connection with S3 credentials for authenticated access
+                    _duckDbConnection = await Task.Run(() =>
+                        DuckDbManager.Instance.CreateConnectionWithS3Access(immutableCredentials, region));
                 }
-
-                if (awsCredentials == null)
-                {
-                    throw new InvalidOperationException("Unable to retrieve AWS credentials.");
-                }
-
-                var immutableCredentials = await awsCredentials.GetCredentialsAsync();
-                var region = _s3Client.Config.RegionEndpoint?.SystemName ?? "us-east-1";
-
-                // Create connection with S3 access on background thread
-                _duckDbConnection = await Task.Run(() =>
-                    DuckDbManager.Instance.CreateConnectionWithS3Access(immutableCredentials, region));
 
                 // Start loading data once connection is ready
                 LoadParquetDataAsync();
@@ -462,7 +476,8 @@ namespace S3Browser
                     queryToEdit,
                     _fileName,
                     _awsProfile,
-                    this); // Pass reference to this window for re-execution
+                    this, // Pass reference to this window for re-execution
+                    _isPublicBucket); // Pass public bucket flag
 
                 queryDialog.Show();
             }

@@ -11,7 +11,7 @@ namespace S3Browser.Services
         private readonly CredentialProfileStoreChain _credentialChain;
 
         /// <summary>
-        /// Initializes a new instance of the AwsCredentialService.
+        /// Initializes a new instance of the <see cref="AwsCredentialService"/> class.
         /// Creates an internal credential profile store chain for resolving credentials.
         /// </summary>
         public AwsCredentialService()

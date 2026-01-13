@@ -1,4 +1,4 @@
-namespace S3Browser.Helpers
+﻿namespace S3Browser.Helpers
 {
     /// <summary>
     /// Helper class for file-related utility methods.

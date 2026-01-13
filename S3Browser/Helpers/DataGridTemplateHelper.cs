@@ -3,7 +3,6 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
-using S3Browser.Converters;
 
 namespace S3Browser.Helpers
 {

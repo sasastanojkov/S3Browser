@@ -87,7 +87,7 @@ namespace S3Browser
         private CancellationTokenSource? _cancellationTokenSource;
 
         /// <summary>
-        /// Initializes a new instance of the TabularFileViewerWindow.
+        /// Initializes a new instance of the <see cref="TabularFileViewerWindow"/> class.
         /// </summary>
         /// <param name="s3Client">AWS S3 client for accessing S3 resources.</param>
         /// <param name="bucketName">Name of the S3 bucket containing the file.</param>
