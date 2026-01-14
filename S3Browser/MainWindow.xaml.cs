@@ -20,6 +20,8 @@ namespace S3Browser
         private string? _currentBucket;
         private string _currentPrefix = string.Empty;
         private Stack<string> _navigationStack = new Stack<string>();
+        private string? _currentProfile;
+        private bool _isAnonymousMode;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MainWindow"/> class.
@@ -48,6 +50,10 @@ namespace S3Browser
             {
                 StatusTextBlock.Text = "Initializing...";
                 StatusProgressBar.Visibility = Visibility.Visible;
+
+                _currentProfile = awsProfile;
+                _isAnonymousMode = isAnonymousMode;
+                UpdateWindowTitle();
 
                 S3Manager.Instance.Initialize(awsProfile, isAnonymousMode);
 
@@ -742,6 +748,22 @@ namespace S3Browser
                 StatusProgressBar.Visibility = Visibility.Collapsed;
                 MessageBox.Show($"Error changing profile: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void UpdateWindowTitle()
+        {
+            if (_isAnonymousMode)
+            {
+                Title = "S3 Browser";
+            }
+            else if (!string.IsNullOrEmpty(_currentProfile))
+            {
+                Title = $"S3 Browser - {_currentProfile}";
+            }
+            else
+            {
+                Title = "S3 Browser";
             }
         }
 

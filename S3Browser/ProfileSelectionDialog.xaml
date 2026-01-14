@@ -26,15 +26,15 @@
                    Margin="0,0,0,10"/>
 
         <TextBlock Grid.Row="1"
-                   Text="Please enter the AWS profile name to use:" 
+                   Text="Please select an AWS profile to use:" 
                    Margin="0,0,0,10"/>
 
-        <TextBox Grid.Row="2" 
-                 x:Name="ProfileTextBox"
-                 Text=""
-                 Padding="5"
-                 FontSize="14"
-                 Margin="0,0,0,10"/>
+        <ComboBox Grid.Row="2" 
+                  x:Name="ProfileComboBox"
+                  Padding="5"
+                  FontSize="14"
+                  Margin="0,0,0,10"
+                  IsEditable="True"/>
 
         <Button Grid.Row="3"
                 x:Name="AnonymousButton"
