@@ -58,7 +58,10 @@
                     Click="HomeButton_Click"
                     Visibility="Collapsed"
                     ToolTip="Return to buckets list">
-                <TextBlock FontFamily="Segoe UI Emoji, Segoe UI Symbol" Text="?? Home"/>
+                <TextBlock>
+                    <Run FontFamily="Segoe MDL2 Assets" Text="&#xE80F;"/>
+                    <Run Text=" Home"/>
+                </TextBlock>
             </Button>
             
             <Button Grid.Column="4"
@@ -68,7 +71,10 @@
                     Margin="10,0,0,0"
                     Click="ChangeProfileButton_Click"
                     ToolTip="Switch between profiles or anonymous mode">
-                <TextBlock FontFamily="Segoe UI Emoji, Segoe UI Symbol" Text="?? Change Profile"/>
+                <TextBlock>
+                    <Run FontFamily="Segoe MDL2 Assets" Text="&#xE77B;"/>
+                    <Run Text=" Change Profile"/>
+                </TextBlock>
             </Button>
         </Grid>
 
@@ -88,10 +94,10 @@
                     Visibility="Collapsed"
                     Click="ReadAllParquetButton_Click"
                     ToolTip="Query all .parquet files in this folder using DuckDB wildcard">
-                <TextBlock FontFamily="Segoe UI Emoji, Segoe UI Symbol" 
-                           FontSize="13" 
-                           FontWeight="SemiBold"
-                           Text="?? Read All Parquet Files"/>
+                <TextBlock FontSize="13" FontWeight="SemiBold">
+                    <Run FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;"/>
+                    <Run Text=" Read All Parquet Files"/>
+                </TextBlock>
             </Button>
 
             <Button Grid.Column="2"
@@ -103,10 +109,10 @@
                     Visibility="Collapsed"
                     Click="WriteQueryButton_Click"
                     ToolTip="Write and execute a custom SQL query against parquet files">
-                <TextBlock FontFamily="Segoe UI Emoji, Segoe UI Symbol" 
-                           FontSize="13" 
-                           FontWeight="SemiBold"
-                           Text="?? Write Custom Query"/>
+                <TextBlock FontSize="13" FontWeight="SemiBold">
+                    <Run FontFamily="Segoe MDL2 Assets" Text="&#xE70F;"/>
+                    <Run Text=" Write Custom Query"/>
+                </TextBlock>
             </Button>
         </Grid>
 
