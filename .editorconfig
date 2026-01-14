@@ -329,3 +329,12 @@ dotnet_diagnostic.SA1516.severity = none
 
 # SA1518: Use line endings correctly at end of file
 dotnet_diagnostic.SA1518.severity = none
+
+# SA1028: Code should not contain trailing whitespace (TREAT AS ERROR)
+dotnet_diagnostic.SA1028.severity = error
+
+# SA1642: Constructor summary documentation should begin with standard text
+dotnet_diagnostic.SA1642.severity = none
+
+# SA1629: Documentation text should end with a period
+dotnet_diagnostic.SA1629.severity = none

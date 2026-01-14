@@ -1,6 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
-using Amazon.S3;
+using S3Browser.Services;
 
 namespace S3Browser
 {
@@ -10,32 +10,23 @@ namespace S3Browser
     /// </summary>
     public partial class QueryEditorDialog : Window
     {
-        private readonly IAmazonS3 _s3Client;
         private readonly string _bucketName;
-        private readonly string? _awsProfile;
         private readonly string _folderName;
-        private readonly bool _isPublicBucket;
         private readonly ParquetViewerWindow? _existingViewerWindow;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="QueryEditorDialog"/> class.
         /// </summary>
-        /// <param name="s3Client">AWS S3 client for accessing S3 resources.</param>
         /// <param name="bucketName">Name of the S3 bucket containing the Parquet files.</param>
         /// <param name="initialQuery">Initial SQL query to populate the editor.</param>
         /// <param name="folderName">Display name for the folder being queried.</param>
-        /// <param name="awsProfile">AWS profile name for credential resolution.</param>
         /// <param name="existingViewerWindow">Optional existing ParquetViewerWindow to re-use instead of creating a new one.</param>
-        /// <param name="isPublicBucket">True if the bucket is public and should use anonymous S3 access.</param>
-        public QueryEditorDialog(IAmazonS3 s3Client, string bucketName, string initialQuery, string folderName, string? awsProfile, ParquetViewerWindow? existingViewerWindow = null, bool isPublicBucket = false)
+        public QueryEditorDialog(string bucketName, string initialQuery, string folderName, ParquetViewerWindow? existingViewerWindow = null)
         {
             InitializeComponent();
 
-            _s3Client = s3Client;
             _bucketName = bucketName;
-            _awsProfile = awsProfile;
             _folderName = folderName;
-            _isPublicBucket = isPublicBucket;
             _existingViewerWindow = existingViewerWindow;
 
             // Set initial query
@@ -100,14 +91,11 @@ namespace S3Browser
                 {
                     // Open ParquetViewerWindow with custom query (new window)
                     var viewer = new ParquetViewerWindow(
-                        _s3Client,
                         _bucketName,
                         query, // Pass the custom query as the key parameter
                         _folderName,
                         isWildcard: false, // Mark as not wildcard since we're using custom query
-                        awsProfile: _awsProfile,
-                        customQuery: query, // Pass custom query
-                        isPublicBucket: _isPublicBucket); // Pass public bucket flag
+                        customQuery: query); // Pass custom query
 
                     viewer.Show();
                 }

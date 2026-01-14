@@ -1,12 +1,9 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using Amazon;
-using Amazon.Runtime.CredentialManagement;
-using Amazon.S3;
-using Amazon.S3.Model;
 using S3Browser.Helpers;
+using S3Browser.Services;
 
 namespace S3Browser
 {
@@ -20,14 +17,9 @@ namespace S3Browser
         /// Gets or sets the collection of S3 items (buckets, folders, files) displayed in the main grid.
         /// </summary>
         public ObservableCollection<S3Item> Items { get; set; }
-        private IAmazonS3? _s3Client;
-        private string? _awsProfile;
-        private bool _isAnonymousMode;
         private string? _currentBucket;
         private string _currentPrefix = string.Empty;
         private Stack<string> _navigationStack = new Stack<string>();
-        private HashSet<string> _publicBuckets = new HashSet<string>();
-        private Dictionary<string, RegionEndpoint> _bucketRegions = new Dictionary<string, RegionEndpoint>();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MainWindow"/> class.
@@ -42,19 +34,7 @@ namespace S3Browser
             var dialog = new ProfileSelectionDialog();
             if (dialog.ShowDialog() == true)
             {
-                _awsProfile = dialog.SelectedProfile;
-                _isAnonymousMode = dialog.IsAnonymousMode;
-
-                if (_isAnonymousMode)
-                {
-                    // In anonymous mode, show empty list with instructions
-                    ShowAnonymousWelcomeMessage();
-                }
-                else
-                {
-                    // Load buckets with credentials
-                    LoadBucketsAsync();
-                }
+                InitializeS3ManagerAsync(dialog.SelectedProfile, dialog.IsAnonymousMode);
             }
             else
             {
@@ -62,79 +42,62 @@ namespace S3Browser
             }
         }
 
-        private async void LoadBucketsAsync()
+        private async void InitializeS3ManagerAsync(string? awsProfile, bool isAnonymousMode)
         {
             try
             {
-                // In anonymous mode, we don't list buckets - user must provide bucket name
-                if (_isAnonymousMode)
+                StatusTextBlock.Text = "Initializing...";
+                StatusProgressBar.Visibility = Visibility.Visible;
+
+                S3Manager.Instance.Initialize(awsProfile, isAnonymousMode);
+
+                if (isAnonymousMode)
                 {
                     ShowAnonymousWelcomeMessage();
-                    return;
                 }
+                else
+                {
+                    await LoadBucketsAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = "Initialization failed";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
+                MessageBox.Show($"Failed to initialize: {ex.Message}\n\nMake sure you have run 'aws sso login --profile {awsProfile}' if using authenticated access.",
+                    "Initialization Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
 
-                // Show loading status
-                StatusTextBlock.Text = "Loading AWS credentials...";
+        private async Task LoadBucketsAsync()
+        {
+            try
+            {
+                StatusTextBlock.Text = "Loading S3 buckets...";
                 StatusProgressBar.Visibility = Visibility.Visible;
                 ItemCountTextBlock.Text = "";
 
-                var chain = new CredentialProfileStoreChain();
-                if (!chain.TryGetProfile(_awsProfile!, out var profile))
-                {
-                    StatusTextBlock.Text = "Error: Profile not found";
-                    StatusProgressBar.Visibility = Visibility.Collapsed;
-                    MessageBox.Show($"Could not load AWS profile '{_awsProfile}'.\n\nMake sure the profile exists in your AWS configuration.",
-                        "AWS Configuration Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-
-                if (!chain.TryGetAWSCredentials(_awsProfile!, out var credentials))
-                {
-                    StatusTextBlock.Text = "Error: Credentials not available";
-                    StatusProgressBar.Visibility = Visibility.Collapsed;
-                    MessageBox.Show($"Could not load AWS credentials for profile '{_awsProfile}'.\n\nMake sure you have run 'aws sso login --profile {_awsProfile}' before starting this application.",
-                        "AWS Authentication Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-
-                StatusTextBlock.Text = "Loading S3 buckets...";
-
-                RegionEndpoint? region = profile.Region ?? RegionEndpoint.USEast1;
-                _s3Client = new AmazonS3Client(credentials, region);
-
-                var response = await _s3Client.ListBucketsAsync();
+                var buckets = await S3Manager.Instance.ListBucketsAsync();
 
                 _currentBucket = null;
                 _currentPrefix = string.Empty;
                 _navigationStack.Clear();
 
                 Items.Clear();
-                foreach (var bucket in response.Buckets)
+                foreach (var bucket in buckets)
                 {
+                    bool isPublic = S3Manager.Instance.IsPublicBucket(bucket.BucketName);
                     Items.Add(new S3Item
                     {
                         Type = "Bucket",
-                        Name = bucket.BucketName,
+                        Name = isPublic ? $"{bucket.BucketName} (Public)" : bucket.BucketName,
                         Size = "--",
                         LastModified = bucket.CreationDate?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Unknown"
                     });
                 }
 
-                // Add public buckets to the list
-                foreach (var publicBucket in _publicBuckets)
-                {
-                    Items.Add(new S3Item
-                    {
-                        Type = "Bucket",
-                        Name = publicBucket + " (Public)",
-                        Size = "--",
-                        LastModified = "--"
-                    });
-                }
-
                 UpdateBreadcrumb();
 
-                // Update status
                 int bucketCount = Items.Count;
                 StatusTextBlock.Text = "Ready";
                 StatusProgressBar.Visibility = Visibility.Collapsed;
@@ -144,8 +107,8 @@ namespace S3Browser
             {
                 StatusTextBlock.Text = "Error loading buckets";
                 StatusProgressBar.Visibility = Visibility.Collapsed;
-                MessageBox.Show($"Error loading S3 buckets: {ex.Message}\n\nMake sure you have run 'aws sso login --profile {_awsProfile}' before starting this application.",
-                    "AWS Authentication Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Error loading S3 buckets: {ex.Message}",
+                    "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -165,127 +128,34 @@ namespace S3Browser
             ItemCountTextBlock.Text = "Enter S3 path above to browse public buckets";
         }
 
-        private async void LoadBucketContentsAsync(string bucketName, string prefix = "")
+        private CancellationTokenSource? _loadingCancellationTokenSource;
+
+        private async Task LoadBucketContentsAsync(string bucketName, string prefix = "")
         {
+            // Cancel any existing load operation
+            _loadingCancellationTokenSource?.Cancel();
+            _loadingCancellationTokenSource = new CancellationTokenSource();
+            var cancellationToken = _loadingCancellationTokenSource.Token;
+
             try
             {
-                // Show loading status
                 StatusTextBlock.Text = string.IsNullOrEmpty(prefix)
                     ? $"Loading bucket '{bucketName}'..."
                     : $"Loading folder contents...";
                 StatusProgressBar.Visibility = Visibility.Visible;
                 ItemCountTextBlock.Text = "";
 
-                // Determine which S3 client to use
-                IAmazonS3? s3Client = null;
+                var result = await S3Manager.Instance.ListObjectsAsync(bucketName, prefix);
 
-                if (_publicBuckets.Contains(bucketName))
+                // Check if operation was cancelled
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    // Get the region for this public bucket
-                    RegionEndpoint region = _bucketRegions.ContainsKey(bucketName)
-                        ? _bucketRegions[bucketName]
-                        : RegionEndpoint.USEast1;
-                    s3Client = new AmazonS3Client(new Amazon.Runtime.AnonymousAWSCredentials(), region);
-                }
-                else
-                {
-                    // For private buckets, try to get the bucket's region and create a region-specific client
-                    // This ensures we're using the correct endpoint for the bucket
-
-                    // In anonymous mode, treat all non-cached buckets as public
-                    if (_isAnonymousMode)
-                    {
-                        // Try to access as public bucket
-                        StatusTextBlock.Text = "Detecting region for public bucket...";
-                        try
-                        {
-                            var bucketRegion = await DetectBucketRegionAsync(bucketName);
-                            _bucketRegions[bucketName] = bucketRegion;
-                            s3Client = new AmazonS3Client(new Amazon.Runtime.AnonymousAWSCredentials(), bucketRegion);
-                        }
-                        catch
-                        {
-                            // Use default region
-                            s3Client = new AmazonS3Client(new Amazon.Runtime.AnonymousAWSCredentials(), RegionEndpoint.USEast1);
-                        }
-
-                        StatusTextBlock.Text = string.IsNullOrEmpty(prefix)
-                            ? $"Loading bucket '{bucketName}'..."
-                            : $"Loading folder contents...";
-                    }
-                    else if (_bucketRegions.ContainsKey(bucketName))
-                    {
-                        // We already know the region for this bucket, create a client with that region
-                        var chain = new CredentialProfileStoreChain();
-                        if (chain.TryGetAWSCredentials(_awsProfile!, out var credentials))
-                        {
-                            s3Client = new AmazonS3Client(credentials, _bucketRegions[bucketName]);
-                        }
-                        else
-                        {
-                            s3Client = _s3Client;
-                        }
-                    }
-                    else
-                    {
-                        // Try to detect the bucket's region
-                        StatusTextBlock.Text = "Detecting bucket region...";
-                        try
-                        {
-                            var bucketRegion = await DetectPrivateBucketRegionAsync(bucketName);
-                            if (bucketRegion != null)
-                            {
-                                // Cache the region
-                                _bucketRegions[bucketName] = bucketRegion;
-
-                                // Create a client with the correct region
-                                var chain = new CredentialProfileStoreChain();
-                                if (chain.TryGetAWSCredentials(_awsProfile!, out var credentials))
-                                {
-                                    s3Client = new AmazonS3Client(credentials, bucketRegion);
-                                }
-                                else
-                                {
-                                    s3Client = _s3Client;
-                                }
-                            }
-                            else
-                            {
-                                // Fall back to the default client
-                                s3Client = _s3Client;
-                            }
-                        }
-                        catch
-                        {
-                            // If region detection fails, use the default client
-                            s3Client = _s3Client;
-                        }
-
-                        StatusTextBlock.Text = string.IsNullOrEmpty(prefix)
-                            ? $"Loading bucket '{bucketName}'..."
-                            : $"Loading folder contents...";
-                    }
-                }
-
-                if (s3Client == null)
-                {
-                    MessageBox.Show("S3 client is not initialized. Please restart the application.",
-                        "Client Error", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
 
-                var request = new ListObjectsV2Request
-                {
-                    BucketName = bucketName,
-                    Prefix = prefix,
-                    Delimiter = "/"
-                };
-
-                var response = await s3Client.ListObjectsV2Async(request);
-
                 Items.Clear();
 
-                // Always add ".." entry when inside a bucket (even at root level)
+                // Add ".." entry when inside a bucket
                 Items.Add(new S3Item
                 {
                     Type = "Folder",
@@ -294,62 +164,38 @@ namespace S3Browser
                     LastModified = "--"
                 });
 
-                if (response.CommonPrefixes != null)
+                // Add folders
+                foreach (var folder in result.Folders)
                 {
-                    foreach (var folder in response.CommonPrefixes)
+                    Items.Add(new S3Item
                     {
-                        if (string.IsNullOrEmpty(folder)) continue;
-
-                        var folderName = folder.TrimEnd('/');
-                        if (!string.IsNullOrEmpty(prefix))
-                        {
-                            folderName = folderName.Substring(prefix.Length);
-                        }
-
-                        Items.Add(new S3Item
-                        {
-                            Type = "Folder",
-                            Name = folderName,
-                            Size = "--",
-                            LastModified = "--",
-                            FullKey = folder
-                        });
-                    }
+                        Type = "Folder",
+                        Name = folder.Name,
+                        Size = "--",
+                        LastModified = "--",
+                        FullKey = folder.FullKey
+                    });
                 }
 
-                if (response.S3Objects != null)
+                // Add files
+                foreach (var file in result.Files)
                 {
-                    foreach (var s3Object in response.S3Objects)
+                    Items.Add(new S3Item
                     {
-                        if (s3Object == null || string.IsNullOrEmpty(s3Object.Key)) continue;
-                        if (s3Object.Key.EndsWith("/")) continue;
-
-                        var fileName = s3Object.Key;
-                        if (!string.IsNullOrEmpty(prefix))
-                        {
-                            fileName = fileName.Substring(prefix.Length);
-                        }
-
-                        Items.Add(new S3Item
-                        {
-                            Type = "File",
-                            Name = fileName,
-                            Size = FileHelper.FormatFileSize(s3Object.Size ?? 0),
-                            LastModified = s3Object.LastModified?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Unknown",
-                            FullKey = s3Object.Key
-                        });
-                    }
+                        Type = "File",
+                        Name = file.Name,
+                        Size = FileHelper.FormatFileSize(file.Size),
+                        LastModified = file.LastModified?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Unknown",
+                        FullKey = file.FullKey
+                    });
                 }
 
-                // Check if folder contains only parquet files
                 CheckAndShowReadAllParquetButton();
-
                 UpdateBreadcrumb();
 
                 // Update status
-                int totalItems = Items.Count - 1; // Subtract the ".." entry
-                int folderCount = Items.Count(i => i.Type == "Folder" && i.Name != "..");
-                int fileCount = Items.Count(i => i.Type == "File");
+                int folderCount = result.Folders.Count;
+                int fileCount = result.Files.Count;
 
                 StatusTextBlock.Text = "Ready";
                 StatusProgressBar.Visibility = Visibility.Collapsed;
@@ -371,135 +217,30 @@ namespace S3Browser
                     ItemCountTextBlock.Text = "Empty";
                 }
             }
-            catch (AmazonS3Exception ex)
+            catch (OperationCanceledException)
             {
-                StatusTextBlock.Text = "Error loading contents";
+                // Operation was cancelled, do nothing
+                StatusTextBlock.Text = "Loading cancelled";
                 StatusProgressBar.Visibility = Visibility.Collapsed;
-                MessageBox.Show($"AWS S3 Error: {ex.Message}\n\nError Code: {ex.ErrorCode}\nStatus Code: {ex.StatusCode}",
-                    "S3 Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             catch (Exception ex)
             {
                 StatusTextBlock.Text = "Error loading contents";
                 StatusProgressBar.Visibility = Visibility.Collapsed;
-                MessageBox.Show($"Error loading bucket contents: {ex.Message}\n\n{ex.GetType().Name}",
+                MessageBox.Show($"Error loading bucket contents: {ex.Message}",
                     "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
-        }
-
-        /// <summary>
-        /// Detects the region of a private S3 bucket using authenticated credentials.
-        /// </summary>
-        private async Task<RegionEndpoint?> DetectPrivateBucketRegionAsync(string bucketName)
-        {
-            try
-            {
-                // Use the authenticated client to get bucket location
-                if (_s3Client != null)
-                {
-                    var locationRequest = new GetBucketLocationRequest
-                    {
-                        BucketName = bucketName
-                    };
-                    var locationResponse = await _s3Client.GetBucketLocationAsync(locationRequest);
-
-                    // Convert S3 location to RegionEndpoint
-                    if (string.IsNullOrEmpty(locationResponse.Location.Value) || locationResponse.Location.Value == "us-east-1" || locationResponse.Location.Value == "")
-                    {
-                        return RegionEndpoint.USEast1;
-                    }
-
-                    return RegionEndpoint.GetBySystemName(locationResponse.Location.Value);
-                }
-            }
-            catch
-            {
-                // If detection fails, return null
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Gets the appropriate S3 client for the current bucket with the correct region.
-        /// </summary>
-        private async Task<IAmazonS3?> GetS3ClientForCurrentBucketAsync()
-        {
-            if (_currentBucket == null)
-                return null;
-
-            // Check if it's a public bucket
-            if (_publicBuckets.Contains(_currentBucket))
-            {
-                RegionEndpoint region = _bucketRegions.ContainsKey(_currentBucket)
-                    ? _bucketRegions[_currentBucket]
-                    : RegionEndpoint.USEast1;
-                return new AmazonS3Client(new Amazon.Runtime.AnonymousAWSCredentials(), region);
-            }
-
-            // In anonymous mode, treat all buckets as public
-            if (_isAnonymousMode)
-            {
-                RegionEndpoint region;
-                if (_bucketRegions.ContainsKey(_currentBucket))
-                {
-                    region = _bucketRegions[_currentBucket];
-                }
-                else
-                {
-                    // Detect region
-                    region = await DetectBucketRegionAsync(_currentBucket);
-                    _bucketRegions[_currentBucket] = region;
-                }
-                return new AmazonS3Client(new Amazon.Runtime.AnonymousAWSCredentials(), region);
-            }
-
-            // For private buckets, check if we already have the region cached
-            if (_bucketRegions.ContainsKey(_currentBucket))
-            {
-                var chain = new CredentialProfileStoreChain();
-                if (chain.TryGetAWSCredentials(_awsProfile!, out var credentials))
-                {
-                    return new AmazonS3Client(credentials, _bucketRegions[_currentBucket]);
-                }
-            }
-            else
-            {
-                // Try to detect the region
-                try
-                {
-                    var bucketRegion = await DetectPrivateBucketRegionAsync(_currentBucket);
-                    if (bucketRegion != null)
-                    {
-                        _bucketRegions[_currentBucket] = bucketRegion;
-
-                        var chain = new CredentialProfileStoreChain();
-                        if (chain.TryGetAWSCredentials(_awsProfile!, out var credentials))
-                        {
-                            return new AmazonS3Client(credentials, bucketRegion);
-                        }
-                    }
-                }
-                catch
-                {
-                    // Region detection failed, fall through to default client
-                }
-            }
-
-            // Fall back to default client
-            return _s3Client;
         }
 
         private void UpdateBreadcrumb()
         {
             if (_currentBucket == null)
             {
-                TitleTextBlock.Text = "AWS S3 Buckets";
+                TitleTextBlock.Text = S3Manager.Instance.IsAnonymousMode() ? "Anonymous Access Mode" : "AWS S3 Buckets";
                 S3PathTextBox.Text = "";
             }
             else
             {
-                // Show bucket and current folder name in title
                 if (string.IsNullOrEmpty(_currentPrefix))
                 {
                     TitleTextBlock.Text = $"Bucket: {_currentBucket}";
@@ -507,7 +248,6 @@ namespace S3Browser
                 }
                 else
                 {
-                    // Extract current folder name from prefix
                     string folderName = _currentPrefix.TrimEnd('/');
                     int lastSlash = folderName.LastIndexOf('/');
                     if (lastSlash >= 0)
@@ -534,7 +274,7 @@ namespace S3Browser
             }
         }
 
-        private void HandleFileSelection()
+        private async void HandleFileSelection()
         {
             if (FilesDataGrid.SelectedItem is S3Item selectedItem)
             {
@@ -549,7 +289,7 @@ namespace S3Browser
                     _currentBucket = bucketName;
                     _currentPrefix = string.Empty;
                     _navigationStack.Clear();
-                    LoadBucketContentsAsync(_currentBucket);
+                    await LoadBucketContentsAsync(_currentBucket);
                 }
                 else if (selectedItem.Type == "Folder")
                 {
@@ -561,7 +301,7 @@ namespace S3Browser
                         }
                         else
                         {
-                            LoadBucketsAsync();
+                            await LoadBucketsAsync();
                             return;
                         }
                     }
@@ -573,7 +313,7 @@ namespace S3Browser
 
                     if (_currentBucket != null)
                     {
-                        LoadBucketContentsAsync(_currentBucket, _currentPrefix);
+                        await LoadBucketContentsAsync(_currentBucket, _currentPrefix);
                     }
                 }
                 else if (selectedItem.Type == "File")
@@ -635,22 +375,10 @@ namespace S3Browser
                 if (_currentBucket == null || string.IsNullOrEmpty(fileItem.FullKey))
                     return;
 
-                // Get the appropriate S3 client with correct region
-                var s3Client = await GetS3ClientForCurrentBucketAsync();
-
-                if (s3Client == null)
-                    return;
-
-                var headRequest = new GetObjectMetadataRequest
-                {
-                    BucketName = _currentBucket,
-                    Key = fileItem.FullKey
-                };
-
-                var metadata = await s3Client.GetObjectMetadataAsync(headRequest);
+                var metadata = await S3Manager.Instance.GetObjectMetadataAsync(_currentBucket, fileItem.FullKey);
                 long fileSize = metadata.ContentLength;
 
-                var viewer = new FileViewerWindow(s3Client, _currentBucket, fileItem.FullKey, fileItem.Name, fileSize);
+                var viewer = new FileViewerWindow(_currentBucket, fileItem.FullKey, fileItem.Name, fileSize);
                 viewer.Show();
             }
             catch (Exception ex)
@@ -660,23 +388,14 @@ namespace S3Browser
             }
         }
 
-        private async void OpenParquetFileViewer(S3Item fileItem)
+        private void OpenParquetFileViewer(S3Item fileItem)
         {
             try
             {
                 if (_currentBucket == null || string.IsNullOrEmpty(fileItem.FullKey))
                     return;
 
-                // Check if this is a public bucket
-                bool isPublicBucket = _publicBuckets.Contains(_currentBucket);
-
-                // Get the appropriate S3 client with correct region
-                var s3Client = await GetS3ClientForCurrentBucketAsync();
-
-                if (s3Client == null)
-                    return;
-
-                var viewer = new ParquetViewerWindow(s3Client, _currentBucket, fileItem.FullKey, fileItem.Name, false, _awsProfile, null, isPublicBucket);
+                var viewer = new ParquetViewerWindow(_currentBucket, fileItem.FullKey, fileItem.Name, isWildcard: false);
                 viewer.Show();
             }
             catch (Exception ex)
@@ -686,20 +405,14 @@ namespace S3Browser
             }
         }
 
-        private async void OpenTabularFileViewer(S3Item fileItem, string fileType)
+        private void OpenTabularFileViewer(S3Item fileItem, string fileType)
         {
             try
             {
                 if (_currentBucket == null || string.IsNullOrEmpty(fileItem.FullKey))
                     return;
 
-                // Get the appropriate S3 client with correct region
-                var s3Client = await GetS3ClientForCurrentBucketAsync();
-
-                if (s3Client == null)
-                    return;
-
-                var viewer = new TabularFileViewerWindow(s3Client, _currentBucket, fileItem.FullKey, fileItem.Name, fileType);
+                var viewer = new TabularFileViewerWindow(_currentBucket, fileItem.FullKey, fileItem.Name, fileType);
                 viewer.Show();
             }
             catch (Exception ex)
@@ -750,36 +463,12 @@ namespace S3Browser
 
                 var (bucketName, key) = parsedPath.Value;
 
-                // Show bucket access status
-                StatusTextBlock.Text = $"Accessing bucket '{bucketName}'...";
-
-                // Try to determine the appropriate S3 client and bucket accessibility
-                IAmazonS3? s3Client = await GetS3ClientForBucketAsync(bucketName);
-
-                if (s3Client == null)
-                {
-                    StatusTextBlock.Text = "Error: Bucket not accessible";
-                    StatusProgressBar.Visibility = Visibility.Collapsed;
-                    MessageBox.Show($"Unable to access bucket '{bucketName}'. The bucket may not exist, may not be publicly accessible, or you may not have permission to access it.",
-                        "Access Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-
-                // Check if it's a file or folder
                 if (!string.IsNullOrEmpty(key))
                 {
-                    // Try to get object metadata to determine if it's a file
                     try
                     {
                         StatusTextBlock.Text = "Checking object metadata...";
-
-                        var headRequest = new GetObjectMetadataRequest
-                        {
-                            BucketName = bucketName,
-                            Key = key
-                        };
-
-                        var metadata = await s3Client.GetObjectMetadataAsync(headRequest);
+                        var metadata = await S3Manager.Instance.GetObjectMetadataAsync(bucketName, key);
 
                         // It's a file, open the appropriate viewer
                         string fileName = System.IO.Path.GetFileName(key);
@@ -823,7 +512,7 @@ namespace S3Browser
                         StatusTextBlock.Text = "Ready";
                         return;
                     }
-                    catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                    catch (Exception ex) when (ex.Message.Contains("NotFound") || ex.Message.Contains("404"))
                     {
                         // Not a file, treat as a folder/prefix
                         StatusTextBlock.Text = "Loading folder...";
@@ -838,7 +527,7 @@ namespace S3Browser
                 BuildNavigationStack(_currentPrefix);
 
                 // LoadBucketContentsAsync will update the status bar
-                LoadBucketContentsAsync(_currentBucket, _currentPrefix);
+                await LoadBucketContentsAsync(_currentBucket, _currentPrefix);
             }
             catch (Exception ex)
             {
@@ -941,34 +630,22 @@ namespace S3Browser
             }
         }
 
-        private async void ReadAllParquetButton_Click(object sender, RoutedEventArgs e)
+        private void ReadAllParquetButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
                 if (_currentBucket == null)
                     return;
 
-                // Check if this is a public bucket
-                bool isPublicBucket = _publicBuckets.Contains(_currentBucket);
-
-                // Get the appropriate S3 client with correct region
-                var s3Client = await GetS3ClientForCurrentBucketAsync();
-
-                if (s3Client == null)
-                    return;
-
-                // Create a wildcard pattern for all parquet files in the current prefix
                 string wildcardPattern = string.IsNullOrEmpty(_currentPrefix)
                     ? "*.parquet"
                     : $"{_currentPrefix.TrimEnd('/')}/*.parquet";
 
-                // Extract folder name for window title
                 string folderName = string.IsNullOrEmpty(_currentPrefix)
                     ? _currentBucket
                     : _currentPrefix.TrimEnd('/').Split('/').Last();
 
-                // Open the parquet viewer with wildcard mode
-                var viewer = new ParquetViewerWindow(s3Client, _currentBucket, wildcardPattern, folderName, isWildcard: true, awsProfile: _awsProfile, customQuery: null, isPublicBucket: isPublicBucket);
+                var viewer = new ParquetViewerWindow(_currentBucket, wildcardPattern, folderName, isWildcard: true);
                 viewer.Show();
             }
             catch (Exception ex)
@@ -978,39 +655,25 @@ namespace S3Browser
             }
         }
 
-        private async void WriteQueryButton_Click(object sender, RoutedEventArgs e)
+        private void WriteQueryButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
                 if (_currentBucket == null)
                     return;
 
-                // Check if this is a public bucket
-                bool isPublicBucket = _publicBuckets.Contains(_currentBucket);
-
-                // Get the appropriate S3 client with correct region
-                var s3Client = await GetS3ClientForCurrentBucketAsync();
-
-                if (s3Client == null)
-                    return;
-
-                // Create a wildcard pattern for all parquet files in the current prefix
                 string wildcardPattern = string.IsNullOrEmpty(_currentPrefix)
                     ? "*.parquet"
                     : $"{_currentPrefix.TrimEnd('/')}/*.parquet";
 
                 string s3Path = $"s3://{_currentBucket}/{wildcardPattern.Replace("*.parquet", "")}*.parquet";
-
-                // Generate initial query
                 string initialQuery = $"SELECT * FROM read_parquet('{s3Path}')";
 
-                // Extract folder name for window title
                 string folderName = string.IsNullOrEmpty(_currentPrefix)
                     ? _currentBucket
                     : _currentPrefix.TrimEnd('/').Split('/').Last();
 
-                // Open query editor dialog
-                var queryDialog = new QueryEditorDialog(s3Client, _currentBucket, initialQuery, folderName, _awsProfile, null, isPublicBucket);
+                var queryDialog = new QueryEditorDialog(_currentBucket, initialQuery, folderName);
                 queryDialog.Show();
             }
             catch (Exception ex)
@@ -1018,164 +681,6 @@ namespace S3Browser
                 MessageBox.Show($"Error opening query editor: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
-        }
-
-        /// <summary>
-        /// Gets the appropriate S3 client for a bucket, detecting if it's accessible with credentials or publicly.
-        /// Caches the result for subsequent access.
-        /// </summary>
-        private async Task<IAmazonS3?> GetS3ClientForBucketAsync(string bucketName)
-        {
-            // Check if we already know this is a public bucket
-            if (_publicBuckets.Contains(bucketName))
-            {
-                RegionEndpoint region = _bucketRegions.ContainsKey(bucketName)
-                    ? _bucketRegions[bucketName]
-                    : RegionEndpoint.USEast1;
-                return new AmazonS3Client(new Amazon.Runtime.AnonymousAWSCredentials(), region);
-            }
-
-            // In anonymous mode, skip authenticated access and go straight to public
-            if (!_isAnonymousMode && _s3Client != null)
-            {
-                // First, try with the authenticated client
-                try
-                {
-                    StatusTextBlock.Text = $"Testing authenticated access to '{bucketName}'...";
-
-                    var testRequest = new ListObjectsV2Request
-                    {
-                        BucketName = bucketName,
-                        MaxKeys = 1
-                    };
-                    await _s3Client.ListObjectsV2Async(testRequest);
-                    return _s3Client;
-                }
-                catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden ||
-                                                     ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                {
-                    // Access denied with credentials, try public access
-                    StatusTextBlock.Text = $"Trying public access to '{bucketName}'...";
-                }
-                catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-                {
-                    // Bucket doesn't exist
-                    return null;
-                }
-                catch
-                {
-                    // Other error, continue to try public access
-                    StatusTextBlock.Text = $"Trying public access to '{bucketName}'...";
-                }
-            }
-            else if (_isAnonymousMode)
-            {
-                StatusTextBlock.Text = $"Accessing public bucket '{bucketName}'...";
-            }
-
-            // Try to access as a public bucket
-            try
-            {
-                StatusTextBlock.Text = $"Detecting region for public bucket '{bucketName}'...";
-                RegionEndpoint region = await DetectBucketRegionAsync(bucketName);
-
-                StatusTextBlock.Text = $"Testing public access to '{bucketName}'...";
-                var anonymousClient = new AmazonS3Client(new Amazon.Runtime.AnonymousAWSCredentials(), region);
-
-                var testRequest = new ListObjectsV2Request
-                {
-                    BucketName = bucketName,
-                    MaxKeys = 1
-                };
-                await anonymousClient.ListObjectsV2Async(testRequest);
-
-                // Success! Cache this as a public bucket
-                _publicBuckets.Add(bucketName);
-                _bucketRegions[bucketName] = region;
-
-                // Add to the displayed list if we're at the bucket list view
-                if (_currentBucket == null && !_isAnonymousMode)
-                {
-                    Items.Add(new S3Item
-                    {
-                        Type = "Bucket",
-                        Name = bucketName + " (Public)",
-                        Size = "--",
-                        LastModified = "--"
-                    });
-                }
-
-                return anonymousClient;
-            }
-            catch
-            {
-                // Unable to access bucket
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Detects the region of an S3 bucket by trying GetBucketLocation or common regions.
-        /// </summary>
-        private async Task<RegionEndpoint> DetectBucketRegionAsync(string bucketName)
-        {
-            // First, try to use GetBucketLocation API with us-east-1 client
-            try
-            {
-                var usEast1Client = new AmazonS3Client(new Amazon.Runtime.AnonymousAWSCredentials(), RegionEndpoint.USEast1);
-                var locationRequest = new GetBucketLocationRequest
-                {
-                    BucketName = bucketName
-                };
-                var locationResponse = await usEast1Client.GetBucketLocationAsync(locationRequest);
-
-                // Convert S3 location to RegionEndpoint
-                if (string.IsNullOrEmpty(locationResponse.Location.Value) || locationResponse.Location.Value == "us-east-1")
-                {
-                    return RegionEndpoint.USEast1;
-                }
-
-                return RegionEndpoint.GetBySystemName(locationResponse.Location.Value);
-            }
-            catch
-            {
-                // GetBucketLocation failed, try brute force approach
-            }
-
-            // Try common regions by attempting to list objects
-            var regionsToTry = new[]
-            {
-                RegionEndpoint.USEast1,
-                RegionEndpoint.USWest2,
-                RegionEndpoint.USWest1,
-                RegionEndpoint.USEast2,
-                RegionEndpoint.EUWest1,
-                RegionEndpoint.EUCentral1,
-                RegionEndpoint.APSoutheast1,
-                RegionEndpoint.APNortheast1
-            };
-
-            foreach (var region in regionsToTry)
-            {
-                try
-                {
-                    var client = new AmazonS3Client(new Amazon.Runtime.AnonymousAWSCredentials(), region);
-                    var request = new ListObjectsV2Request
-                    {
-                        BucketName = bucketName,
-                        MaxKeys = 1
-                    };
-                    await client.ListObjectsV2Async(request);
-                    return region;
-                }
-                catch
-                {
-                    continue;
-                }
-            }
-
-            // Default to us-east-1 if detection fails
-            return RegionEndpoint.USEast1;
         }
     }
 

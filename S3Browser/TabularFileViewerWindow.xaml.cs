@@ -5,8 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
-using Amazon.S3;
-using Amazon.S3.Model;
+using S3Browser.Services;
 
 namespace S3Browser
 {
@@ -75,10 +74,10 @@ namespace S3Browser
     /// <summary>
     /// Window for viewing tabular files (CSV and TSV) from S3.
     /// Downloads files temporarily and parses them with custom delimiter handling.
+    /// Uses S3Manager for all S3 operations.
     /// </summary>
     public partial class TabularFileViewerWindow : Window
     {
-        private readonly IAmazonS3 _s3Client;
         private readonly string _bucketName;
         private readonly string _key;
         private readonly string _fileName;
@@ -89,16 +88,14 @@ namespace S3Browser
         /// <summary>
         /// Initializes a new instance of the <see cref="TabularFileViewerWindow"/> class.
         /// </summary>
-        /// <param name="s3Client">AWS S3 client for accessing S3 resources.</param>
         /// <param name="bucketName">Name of the S3 bucket containing the file.</param>
         /// <param name="key">S3 key (path) to the file.</param>
         /// <param name="fileName">Display name for the file.</param>
         /// <param name="fileType">Type of file: "csv" or "tsv".</param>
-        public TabularFileViewerWindow(IAmazonS3 s3Client, string bucketName, string key, string fileName, string fileType)
+        public TabularFileViewerWindow(string bucketName, string key, string fileName, string fileType)
         {
             InitializeComponent();
 
-            _s3Client = s3Client;
             _bucketName = bucketName;
             _key = key;
             _fileName = fileName;
@@ -138,13 +135,7 @@ namespace S3Browser
                 {
                     _localFilePath = Path.Combine(Path.GetTempPath(), $"s3browser_{Guid.NewGuid()}_{_fileName}");
 
-                    var request = new GetObjectRequest
-                    {
-                        BucketName = _bucketName,
-                        Key = _key
-                    };
-
-                    using (var response = await _s3Client.GetObjectAsync(request, cancellationToken))
+                    using (var response = await S3Manager.Instance.GetObjectAsync(_bucketName, _key))
                     {
                         await response.WriteResponseStreamToFileAsync(_localFilePath, false, cancellationToken);
                     }

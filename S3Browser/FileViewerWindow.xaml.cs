@@ -1,19 +1,18 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using Amazon.S3;
-using Amazon.S3.Model;
 using S3Browser.Helpers;
+using S3Browser.Services;
 
 namespace S3Browser
 {
     /// <summary>
     /// Window for viewing text-based files from S3.
     /// Displays content in a read-only text editor with configurable read limits.
+    /// Uses S3Manager for all S3 operations.
     /// </summary>
     public partial class FileViewerWindow : Window
     {
-        private readonly IAmazonS3 _s3Client;
         private readonly string _bucketName;
         private readonly string _key;
         private readonly long _fileSize;
@@ -22,16 +21,14 @@ namespace S3Browser
         /// <summary>
         /// Initializes a new instance of the FileViewerWindow.
         /// </summary>
-        /// <param name="s3Client">AWS S3 client for accessing S3 resources.</param>
         /// <param name="bucketName">Name of the S3 bucket containing the file.</param>
         /// <param name="key">S3 key (path) to the file.</param>
         /// <param name="fileName">Display name for the file.</param>
         /// <param name="fileSize">Size of the file in bytes.</param>
-        public FileViewerWindow(IAmazonS3 s3Client, string bucketName, string key, string fileName, long fileSize)
+        public FileViewerWindow(string bucketName, string key, string fileName, long fileSize)
         {
             InitializeComponent();
 
-            _s3Client = s3Client;
             _bucketName = bucketName;
             _key = key;
             _fileSize = fileSize;
@@ -59,13 +56,7 @@ namespace S3Browser
                 StatusTextBlock.Text = "Loading file...";
                 ContentTextBox.Text = "";
 
-                var request = new GetObjectRequest
-                {
-                    BucketName = _bucketName,
-                    Key = _key
-                };
-
-                using (var response = await _s3Client.GetObjectAsync(request, cancellationToken))
+                using (var response = await S3Manager.Instance.GetObjectAsync(_bucketName, _key))
                 {
                     if (readLimitBytes == -1)
                     {

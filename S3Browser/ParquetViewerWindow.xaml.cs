@@ -8,13 +8,11 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
-using Amazon.Runtime;
-using Amazon.S3;
-using Amazon.S3.Model;
 using DuckDB.NET.Data;
 using Microsoft.Win32;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
+using S3Browser.Services;
 
 namespace S3Browser
 {
@@ -86,13 +84,10 @@ namespace S3Browser
     /// </summary>
     public partial class ParquetViewerWindow : Window
     {
-        private readonly IAmazonS3 _s3Client;
         private readonly string _bucketName;
         private readonly string _key;
         private readonly string _fileName;
         private readonly bool _isWildcard;
-        private readonly string? _awsProfile;
-        private readonly bool _isPublicBucket;
         private string? _customQuery;
         private string? _lastExecutedQuery;
         private DuckDBConnection? _duckDbConnection;
@@ -105,26 +100,20 @@ namespace S3Browser
         /// <summary>
         /// Initializes a new instance of the <see cref="ParquetViewerWindow"/> class.
         /// </summary>
-        /// <param name="s3Client">AWS S3 client for accessing S3 resources.</param>
         /// <param name="bucketName">Name of the S3 bucket containing the file(s).</param>
         /// <param name="key">S3 key (path) to the file or wildcard pattern.</param>
         /// <param name="fileName">Display name for the file or folder.</param>
         /// <param name="isWildcard">True if key is a wildcard pattern (e.g., "*.parquet"); false for single file.</param>
-        /// <param name="awsProfile">AWS profile name for credential resolution. Can be null.</param>
         /// <param name="customQuery">Optional custom SQL query to execute instead of default query.</param>
-        /// <param name="isPublicBucket">True if the bucket is public and should use anonymous S3 access.</param>
-        public ParquetViewerWindow(IAmazonS3 s3Client, string bucketName, string key, string fileName, bool isWildcard = false, string? awsProfile = null, string? customQuery = null, bool isPublicBucket = false)
+        public ParquetViewerWindow(string bucketName, string key, string fileName, bool isWildcard = false, string? customQuery = null)
         {
             InitializeComponent();
 
-            _s3Client = s3Client;
             _bucketName = bucketName;
             _key = key;
             _fileName = fileName;
             _isWildcard = isWildcard;
-            _awsProfile = awsProfile;
             _customQuery = customQuery;
-            _isPublicBucket = isPublicBucket;
 
             // Subscribe to row selection changes
             ResultsDataGrid.SelectionChanged += ResultsDataGrid_SelectionChanged;
@@ -157,10 +146,19 @@ namespace S3Browser
                 StatusTextBlock.Text = "Initializing database connection...";
                 LoadingMessageTextBlock.Text = "Configuring S3 access...";
 
-                var region = _s3Client.Config.RegionEndpoint?.SystemName ?? "us-east-1";
+                // Get S3Client from S3Manager
+                var s3Client = await S3Manager.Instance.GetS3ClientForBucketAsync(_bucketName);
+                if (s3Client == null)
+                {
+                    throw new InvalidOperationException($"Unable to access bucket '{_bucketName}'.");
+                }
 
-                // Use the isPublicBucket flag to determine which type of connection to create
-                if (_isPublicBucket)
+                var region = s3Client.Config.RegionEndpoint?.SystemName ?? "us-east-1";
+
+                // Check if this is a public bucket using S3Manager
+                bool isPublicBucket = S3Manager.Instance.IsPublicBucket(_bucketName);
+
+                if (isPublicBucket)
                 {
                     // Create connection for anonymous/public S3 access (no credentials)
                     _duckDbConnection = await Task.Run(() =>
@@ -168,15 +166,16 @@ namespace S3Browser
                 }
                 else
                 {
-                    // Get AWS credentials using the profile chain for authenticated access
+                    // Get AWS credentials using S3Manager's profile
                     var chain = new Amazon.Runtime.CredentialManagement.CredentialProfileStoreChain();
                     Amazon.Runtime.AWSCredentials? awsCredentials = null;
 
-                    if (!string.IsNullOrEmpty(_awsProfile))
+                    var awsProfile = S3Manager.Instance.GetAwsProfile();
+                    if (!string.IsNullOrEmpty(awsProfile))
                     {
-                        if (!chain.TryGetAWSCredentials(_awsProfile, out awsCredentials))
+                        if (!chain.TryGetAWSCredentials(awsProfile, out awsCredentials))
                         {
-                            throw new InvalidOperationException($"Unable to retrieve AWS credentials for profile '{_awsProfile}'.");
+                            throw new InvalidOperationException($"Unable to retrieve AWS credentials for profile '{awsProfile}'.");
                         }
                     }
                     else
@@ -471,13 +470,10 @@ namespace S3Browser
 
                 // Open query editor dialog with the current query
                 var queryDialog = new QueryEditorDialog(
-                    _s3Client,
                     _bucketName,
                     queryToEdit,
                     _fileName,
-                    _awsProfile,
-                    this, // Pass reference to this window for re-execution
-                    _isPublicBucket); // Pass public bucket flag
+                    this); // Pass reference to this window for re-execution
 
                 queryDialog.Show();
             }
