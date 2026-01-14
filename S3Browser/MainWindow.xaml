@@ -26,6 +26,7 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <TextBlock Grid.Column="0" 
@@ -47,6 +48,16 @@
                     Height="28"
                     Margin="10,0,0,0"
                     Click="GoButton_Click"/>
+            
+            <Button Grid.Column="3"
+                    x:Name="HomeButton"
+                    Content="🏠 Home" 
+                    Width="80" 
+                    Height="28"
+                    Margin="10,0,0,0"
+                    Click="HomeButton_Click"
+                    Visibility="Collapsed"
+                    ToolTip="Return to buckets list"/>
         </Grid>
 
         <Grid Grid.Row="2" Margin="10,0,10,10">

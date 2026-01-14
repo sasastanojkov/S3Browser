@@ -238,9 +238,11 @@ namespace S3Browser
             {
                 TitleTextBlock.Text = S3Manager.Instance.IsAnonymousMode() ? "Anonymous Access Mode" : "AWS S3 Buckets";
                 S3PathTextBox.Text = "";
+                HomeButton.Visibility = Visibility.Collapsed;
             }
             else
             {
+                HomeButton.Visibility = Visibility.Visible;
                 if (string.IsNullOrEmpty(_currentPrefix))
                 {
                     TitleTextBlock.Text = $"Bucket: {_currentBucket}";
@@ -679,6 +681,28 @@ namespace S3Browser
             catch (Exception ex)
             {
                 MessageBox.Show($"Error opening query editor: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void HomeButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (S3Manager.Instance.IsAnonymousMode())
+                {
+                    ShowAnonymousWelcomeMessage();
+                }
+                else
+                {
+                    await LoadBucketsAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = "Error loading buckets";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
+                MessageBox.Show($"Error navigating home: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
