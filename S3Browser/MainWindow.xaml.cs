@@ -34,7 +34,7 @@ namespace S3Browser
             var dialog = new ProfileSelectionDialog();
             if (dialog.ShowDialog() == true)
             {
-                InitializeS3ManagerAsync(dialog.SelectedProfile, dialog.IsAnonymousMode);
+                _ = InitializeS3ManagerAsync(dialog.SelectedProfile, dialog.IsAnonymousMode);
             }
             else
             {
@@ -42,7 +42,7 @@ namespace S3Browser
             }
         }
 
-        private async void InitializeS3ManagerAsync(string? awsProfile, bool isAnonymousMode)
+        private async Task InitializeS3ManagerAsync(string? awsProfile, bool isAnonymousMode)
         {
             try
             {
@@ -62,8 +62,16 @@ namespace S3Browser
             }
             catch (Exception ex)
             {
+                _currentBucket = null;
+                _currentPrefix = string.Empty;
+                _navigationStack.Clear();
+                Items.Clear();
+                UpdateBreadcrumb();
+
                 StatusTextBlock.Text = "Initialization failed";
                 StatusProgressBar.Visibility = Visibility.Collapsed;
+                ItemCountTextBlock.Text = "";
+
                 MessageBox.Show($"Failed to initialize: {ex.Message}\n\nMake sure you have run 'aws sso login --profile {awsProfile}' if using authenticated access.",
                     "Initialization Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
@@ -703,6 +711,31 @@ namespace S3Browser
                 StatusTextBlock.Text = "Error loading buckets";
                 StatusProgressBar.Visibility = Visibility.Collapsed;
                 MessageBox.Show($"Error navigating home: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void ChangeProfileButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dialog = new ProfileSelectionDialog();
+                if (dialog.ShowDialog() == true)
+                {
+                    _currentBucket = null;
+                    _currentPrefix = string.Empty;
+                    _navigationStack.Clear();
+                    Items.Clear();
+                    UpdateBreadcrumb();
+
+                    await InitializeS3ManagerAsync(dialog.SelectedProfile, dialog.IsAnonymousMode);
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = "Error changing profile";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
+                MessageBox.Show($"Error changing profile: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
