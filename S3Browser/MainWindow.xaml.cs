@@ -282,6 +282,11 @@ namespace S3Browser
                 HandleFileSelection();
                 e.Handled = true;
             }
+            else if (e.Key == Key.C && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                CopyS3PathToClipboard();
+                e.Handled = true;
+            }
         }
 
         private async void HandleFileSelection()
@@ -737,6 +742,53 @@ namespace S3Browser
                 StatusProgressBar.Visibility = Visibility.Collapsed;
                 MessageBox.Show($"Error changing profile: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void CopyS3PathToClipboard()
+        {
+            if (FilesDataGrid.SelectedItem is not S3Item selectedItem)
+                return;
+
+            string s3Path = string.Empty;
+
+            if (selectedItem.Type == "Bucket")
+            {
+                string bucketName = selectedItem.Name;
+                if (bucketName.EndsWith(" (Public)"))
+                {
+                    bucketName = bucketName.Substring(0, bucketName.Length - 9);
+                }
+                s3Path = $"s3://{bucketName}";
+            }
+            else if (selectedItem.Type == "Folder")
+            {
+                if (selectedItem.Name == ".." || _currentBucket == null)
+                    return;
+
+                s3Path = $"s3://{_currentBucket}/{selectedItem.FullKey}";
+            }
+            else if (selectedItem.Type == "File")
+            {
+                if (_currentBucket == null || string.IsNullOrEmpty(selectedItem.FullKey))
+                    return;
+
+                s3Path = $"s3://{_currentBucket}/{selectedItem.FullKey}";
+            }
+
+            if (!string.IsNullOrEmpty(s3Path))
+            {
+                try
+                {
+                    Clipboard.SetText(s3Path);
+                    StatusTextBlock.Text = $"Copied to clipboard: {s3Path}";
+                }
+                catch (Exception ex)
+                {
+                    StatusTextBlock.Text = "Failed to copy to clipboard";
+                    MessageBox.Show($"Failed to copy to clipboard: {ex.Message}", "Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
         }
     }
