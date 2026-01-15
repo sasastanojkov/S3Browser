@@ -83,6 +83,8 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
             <Button Grid.Column="0"
@@ -101,6 +103,21 @@
             </Button>
 
             <Button Grid.Column="2"
+                    x:Name="ReadAllParquetAsTableButton"
+                    Height="35"
+                    Background="#FFFF9800"
+                    Foreground="White"
+                    BorderThickness="0"
+                    Visibility="Collapsed"
+                    Click="ReadAllParquetAsTableButton_Click"
+                    ToolTip="Load all .parquet files into a DuckDB table for faster querying (max 500MB)">
+                <TextBlock FontSize="13" FontWeight="SemiBold">
+                    <Run FontFamily="Segoe MDL2 Assets" Text="&#xE74E;"/>
+                    <Run Text=" Read All As Table"/>
+                </TextBlock>
+            </Button>
+
+            <Button Grid.Column="4"
                     x:Name="WriteQueryButton"
                     Height="35"
                     Background="#FF2196F3"

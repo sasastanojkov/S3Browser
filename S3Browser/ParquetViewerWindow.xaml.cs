@@ -90,6 +90,8 @@ namespace S3Browser
         private readonly bool _isWildcard;
         private string? _customQuery;
         private string? _lastExecutedQuery;
+        private readonly bool _loadAsTable;
+        private readonly string _tableName = "parquet_data";
         private DuckDBConnection? _duckDbConnection;
         private CancellationTokenSource? _cancellationTokenSource;
         private List<string> _geometryWktList = new();
@@ -105,7 +107,8 @@ namespace S3Browser
         /// <param name="fileName">Display name for the file or folder.</param>
         /// <param name="isWildcard">True if key is a wildcard pattern (e.g., "*.parquet"); false for single file.</param>
         /// <param name="customQuery">Optional custom SQL query to execute instead of default query.</param>
-        public ParquetViewerWindow(string bucketName, string key, string fileName, bool isWildcard = false, string? customQuery = null)
+        /// <param name="loadAsTable">True to load all parquet files into a DuckDB table for faster querying.</param>
+        public ParquetViewerWindow(string bucketName, string key, string fileName, bool isWildcard = false, string? customQuery = null, bool loadAsTable = false)
         {
             InitializeComponent();
 
@@ -114,9 +117,13 @@ namespace S3Browser
             _fileName = fileName;
             _isWildcard = isWildcard;
             _customQuery = customQuery;
+            _loadAsTable = loadAsTable;
 
             // Subscribe to row selection changes
             ResultsDataGrid.SelectionChanged += ResultsDataGrid_SelectionChanged;
+
+            // Subscribe to keyboard events for copy functionality
+            ResultsDataGrid.PreviewKeyDown += ResultsDataGrid_PreviewKeyDown;
 
             // Create a dedicated DuckDB connection for this window with S3 access
             InitializeDuckDbConnectionAsync();
@@ -128,8 +135,16 @@ namespace S3Browser
             }
             else if (_isWildcard)
             {
-                FileNameTextBlock.Text = $"Parquet Files in: {fileName}";
-                Title = $"{fileName}/*";
+                if (_loadAsTable)
+                {
+                    FileNameTextBlock.Text = $"Parquet Table: {fileName}";
+                    Title = $"{fileName}/* (Table Mode)";
+                }
+                else
+                {
+                    FileNameTextBlock.Text = $"Parquet Files in: {fileName}";
+                    Title = $"{fileName}/*";
+                }
             }
             else
             {
@@ -281,9 +296,44 @@ namespace S3Browser
                     LoadingMessageTextBlock.Text = "Executing query...";
                     StatusTextBlock.Text = "Querying parquet file(s)...";
 
-                    queryToExecute = rowLimit == -1
-                        ? $"SELECT * FROM read_parquet('{s3Path}')"
-                        : $"SELECT * FROM read_parquet('{s3Path}') LIMIT {rowLimit}";
+                    // If loadAsTable is true, create a table first
+                    if (_loadAsTable && _isWildcard)
+                    {
+                        LoadingMessageTextBlock.Text = "Creating table from parquet files...";
+                        StatusTextBlock.Text = "Loading data into table...";
+
+                        // Create table on background thread
+                        await Task.Run(() =>
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            if (_duckDbConnection == null)
+                            {
+                                throw new InvalidOperationException("DuckDB connection is not initialized.");
+                            }
+
+                            using (var command = _duckDbConnection.CreateCommand())
+                            {
+                                // Create table from all parquet files
+                                command.CommandText = $"CREATE TABLE {_tableName} AS SELECT * FROM read_parquet('{s3Path}')";
+                                command.ExecuteNonQuery();
+                            }
+                        }, cancellationToken);
+
+                        LoadingMessageTextBlock.Text = "Querying table...";
+                        StatusTextBlock.Text = "Reading from table...";
+
+                        // Query the table instead of reading from S3 again
+                        queryToExecute = rowLimit == -1
+                            ? $"SELECT * FROM {_tableName}"
+                            : $"SELECT * FROM {_tableName} LIMIT {rowLimit}";
+                    }
+                    else
+                    {
+                        queryToExecute = rowLimit == -1
+                            ? $"SELECT * FROM read_parquet('{s3Path}')"
+                            : $"SELECT * FROM read_parquet('{s3Path}') LIMIT {rowLimit}";
+                    }
                 }
 
                 // Store the query that will be executed
@@ -309,6 +359,17 @@ namespace S3Browser
                     if (!string.IsNullOrEmpty(_customQuery))
                     {
                         StatusTextBlock.Text = $"Query executed successfully: {rowCount:N0} rows returned";
+                    }
+                    else if (_loadAsTable && _isWildcard)
+                    {
+                        if (rowLimit == -1)
+                        {
+                            StatusTextBlock.Text = $"Table loaded: {rowCount:N0} rows (table: {_tableName})";
+                        }
+                        else
+                        {
+                            StatusTextBlock.Text = $"Table loaded: {rowCount:N0} rows shown (limited to {rowLimit:N0}, table: {_tableName})";
+                        }
                     }
                     else if (rowLimit == -1)
                     {
@@ -454,6 +515,11 @@ namespace S3Browser
                     if (!string.IsNullOrEmpty(_customQuery))
                     {
                         queryToEdit = _customQuery;
+                    }
+                    else if (_loadAsTable && _isWildcard)
+                    {
+                        // If in table mode, default query uses the table
+                        queryToEdit = $"SELECT * FROM {_tableName}";
                     }
                     else if (_isWildcard)
                     {
@@ -955,6 +1021,7 @@ namespace S3Browser
                     MinWidth = 100,
                     MaxWidth = 400, // Prevent extremely wide columns
                     CanUserResize = true, // Allow manual resizing
+                    SortMemberPath = column.ColumnName, // Enable sorting by this column
                     CellTemplate = isGeometryColumn
                         ? CreateGeometryCellTemplate(column.ColumnName)
                         : CreateExpandableCellTemplate(column.ColumnName)
@@ -1105,7 +1172,189 @@ namespace S3Browser
 
                 scrollViewer.Content = textBox;
                 dialog.Content = scrollViewer;
-                dialog.ShowDialog();
+                dialog.Show();
+            }
+        }
+
+        private void ExpandAllButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (ResultsDataGrid.ItemsSource == null)
+            {
+                MessageBox.Show("No data loaded to display.", "No Data",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (ResultsDataGrid.ItemsSource is not DataView dataView || dataView.Count == 0)
+            {
+                MessageBox.Show("No data loaded to display.", "No Data",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // Create comprehensive view window
+            var dialog = new Window
+            {
+                Title = $"All Data - {_fileName}",
+                Width = 900,
+                Height = 650,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this
+            };
+
+            var grid = new Grid();
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Padding = new Thickness(10)
+            };
+
+            var stackPanel = new StackPanel();
+
+            // Build the content
+            var dataTable = dataView.Table ?? new DataTable();
+            int rowNumber = 1;
+
+            foreach (DataRow row in dataTable.Rows)
+            {
+                // Row header
+                var rowHeader = new TextBlock
+                {
+                    Text = $"Row {rowNumber}",
+                    FontSize = 16,
+                    FontWeight = FontWeights.Bold,
+                    Margin = new Thickness(0, rowNumber == 1 ? 0 : 20, 0, 10),
+                    Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(33, 150, 243))
+                };
+                stackPanel.Children.Add(rowHeader);
+
+                // Row separator
+                var separator = new System.Windows.Controls.Separator
+                {
+                    Margin = new Thickness(0, 0, 0, 10)
+                };
+                stackPanel.Children.Add(separator);
+
+                // Create a grid for each row's data
+                var rowGrid = new Grid
+                {
+                    Margin = new Thickness(10, 0, 0, 0)
+                };
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                int cellRow = 0;
+                foreach (DataColumn column in dataTable.Columns)
+                {
+                    rowGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                    // Column name
+                    var columnNameBlock = new TextBlock
+                    {
+                        Text = column.ColumnName + ":",
+                        FontWeight = FontWeights.SemiBold,
+                        Margin = new Thickness(0, 0, 10, 5),
+                        VerticalAlignment = VerticalAlignment.Top
+                    };
+                    Grid.SetRow(columnNameBlock, cellRow);
+                    Grid.SetColumn(columnNameBlock, 0);
+                    rowGrid.Children.Add(columnNameBlock);
+
+                    // Cell value
+                    var cellValue = row[column];
+                    var cellText = cellValue == DBNull.Value || cellValue == null
+                        ? "(null)"
+                        : cellValue.ToString() ?? "";
+
+                    var valueBlock = new TextBlock
+                    {
+                        Text = cellText,
+                        TextWrapping = TextWrapping.Wrap,
+                        FontFamily = new FontFamily("Consolas"),
+                        Margin = new Thickness(0, 0, 0, 5),
+                        Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 245, 245)),
+                        Padding = new Thickness(5)
+                    };
+                    Grid.SetRow(valueBlock, cellRow);
+                    Grid.SetColumn(valueBlock, 1);
+                    rowGrid.Children.Add(valueBlock);
+
+                    cellRow++;
+                }
+
+                stackPanel.Children.Add(rowGrid);
+                rowNumber++;
+            }
+
+            scrollViewer.Content = stackPanel;
+            Grid.SetRow(scrollViewer, 0);
+            grid.Children.Add(scrollViewer);
+
+            // Status bar
+            var statusBar = new System.Windows.Controls.Primitives.StatusBar();
+            var statusText = new TextBlock
+            {
+                Text = $"Showing {dataTable.Rows.Count:N0} rows with {dataTable.Columns.Count} columns"
+            };
+            var statusItem = new System.Windows.Controls.Primitives.StatusBarItem { Content = statusText };
+            statusBar.Items.Add(statusItem);
+            Grid.SetRow(statusBar, 1);
+            grid.Children.Add(statusBar);
+
+            dialog.Content = grid;
+            dialog.Show();
+        }
+
+        private void ResultsDataGrid_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            // Handle Ctrl+C to copy full cell content
+            if (e.Key == Key.C && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                var currentCell = ResultsDataGrid.CurrentCell;
+                if (currentCell.IsValid && currentCell.Item != null)
+                {
+                    try
+                    {
+                        // Get the column name from the current cell
+                        var column = currentCell.Column;
+                        if (column != null)
+                        {
+                            // Get the row data
+                            var rowView = currentCell.Item as DataRowView;
+                            var dataTable = rowView?.Row?.Table;
+                            if (dataTable != null)
+                            {
+                                // Get the full cell content (not truncated)
+                                var columnName = column.Header?.ToString() ?? string.Empty;
+                                if (!string.IsNullOrEmpty(columnName) && dataTable.Columns.Contains(columnName))
+                                {
+#pragma warning disable CS8602 // Dereference of a possibly null reference - rowView is guaranteed non-null when dataTable is not null
+                                    var cellValue = rowView![columnName];
+#pragma warning restore CS8602
+                                    var fullText = cellValue == DBNull.Value || cellValue == null
+                                        ? string.Empty
+                                        : cellValue.ToString() ?? string.Empty;
+
+                                    // Copy the full content to clipboard
+                                    if (!string.IsNullOrEmpty(fullText))
+                                    {
+                                        Clipboard.SetText(fullText);
+                                        e.Handled = true; // Prevent default copy behavior
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Log error but don't show message box to avoid interrupting user
+                        System.Diagnostics.Debug.WriteLine($"Error copying cell content: {ex.Message}");
+                    }
+                }
             }
         }
 
@@ -1124,9 +1373,11 @@ namespace S3Browser
             _cancellationTokenSource?.Cancel();
             _cancellationTokenSource?.Dispose();
 
-            // Dispose DuckDB connection
+            // Dispose DuckDB connection (this will automatically drop the table and free memory)
             if (_duckDbConnection != null)
             {
+                // Note: No need to explicitly drop the table - it will be destroyed when connection is disposed
+                // The in-memory table and all its data will be freed when the connection closes
                 DuckDbManager.Instance.ReleaseConnection(_duckDbConnection);
                 _duckDbConnection = null;
             }

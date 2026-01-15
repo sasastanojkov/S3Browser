@@ -48,17 +48,25 @@
                 </ComboBox>
             </StackPanel>
 
-            <Button Grid.Column="2"
-                    x:Name="EditQueryButton"
-                    Content="Edit Query"
-                    Width="120"
-                    Height="30"
-                    Background="#FF2196F3"
-                    Foreground="White"
-                    BorderThickness="0"
-                    FontWeight="SemiBold"
-                    Click="EditQueryButton_Click"
-                    ToolTip="Edit and re-execute the current query"/>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="EditQueryButton"
+                        Content="Edit Query"
+                        Width="120"
+                        Height="30"
+                        Background="#FF2196F3"
+                        Foreground="White"
+                        BorderThickness="0"
+                        FontWeight="SemiBold"
+                        Click="EditQueryButton_Click"
+                        Margin="0,0,10,0"
+                        ToolTip="Edit and re-execute the current query"/>
+                <Button x:Name="ExpandAllButton"
+                        Content="Expand All"
+                        Width="100"
+                        Height="30"
+                        Click="ExpandAllButton_Click"
+                        ToolTip="View all cell content in a comprehensive window"/>
+            </StackPanel>
 
             <Button Grid.Column="4"
                     Content="Reload"
@@ -78,11 +86,26 @@
                           CanUserAddRows="False"
                           CanUserDeleteRows="False"
                           CanUserResizeRows="False"
+                          CanUserSortColumns="True"
+                          SelectionMode="Single"
+                          SelectionUnit="FullRow"
                           AlternatingRowBackground="WhiteSmoke"
                           GridLinesVisibility="All"
                           HeadersVisibility="All"
                           HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Auto"/>
+                          VerticalScrollBarVisibility="Auto">
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Style.Triggers>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="Background" Value="#FFD0E8FF"/>
+                                    <Setter Property="BorderBrush" Value="#FF2196F3"/>
+                                    <Setter Property="BorderThickness" Value="1"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+                </DataGrid>
                 
                 <!-- Loading Overlay -->
                 <Grid x:Name="LoadingOverlay" 

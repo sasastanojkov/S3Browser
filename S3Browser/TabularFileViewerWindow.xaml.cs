@@ -348,7 +348,7 @@ namespace S3Browser
 
                 scrollViewer.Content = textBox;
                 dialog.Content = scrollViewer;
-                dialog.ShowDialog();
+                dialog.Show();
             }
         }
 

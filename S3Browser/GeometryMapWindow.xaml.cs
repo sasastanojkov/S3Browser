@@ -79,6 +79,10 @@ namespace S3Browser
                     LoadGeometriesInternal(_pendingGeometries, null);
                     _pendingGeometries = null;
                 }
+
+                // Force initial tile loading
+                _map.RefreshData(ChangeType.Discrete);
+                MapCanvas.InvalidateVisual();
             }
             catch (Exception ex)
             {
@@ -94,6 +98,11 @@ namespace S3Browser
             try
             {
                 var tileLayer = OpenStreetMap.CreateTileLayer();
+                tileLayer.DataChanged += (sender, e) =>
+                {
+                    // When tile data changes, refresh the display
+                    Dispatcher.InvokeAsync(() => MapCanvas.InvalidateVisual());
+                };
                 _map.Layers.Add(tileLayer);
             }
             catch (Exception ex)
@@ -441,6 +450,23 @@ namespace S3Browser
                     // Add 10% padding
                     var paddedExtent = extent.Grow(extent.Width * 0.1, extent.Height * 0.1);
                     _map.Navigator.ZoomToBox(paddedExtent);
+
+                    // Force tile layer to refresh by updating the data
+                    _map.RefreshData(ChangeType.Discrete);
+
+                    // Trigger multiple redraws to ensure tiles are loaded
+                    MapCanvas.InvalidateVisual();
+
+                    // Schedule additional redraws to ensure tiles load
+                    Task.Run(async () =>
+                    {
+                        await Task.Delay(100);
+                        await Dispatcher.InvokeAsync(() => MapCanvas.InvalidateVisual());
+                        await Task.Delay(200);
+                        await Dispatcher.InvokeAsync(() => MapCanvas.InvalidateVisual());
+                        await Task.Delay(300);
+                        await Dispatcher.InvokeAsync(() => MapCanvas.InvalidateVisual());
+                    });
                 }
             }
             catch

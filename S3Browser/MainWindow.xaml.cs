@@ -199,6 +199,7 @@ namespace S3Browser
                         Type = "File",
                         Name = file.Name,
                         Size = FileHelper.FormatFileSize(file.Size),
+                        SizeInBytes = file.Size,
                         LastModified = file.LastModified?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Unknown",
                         FullKey = file.FullKey
                     });
@@ -627,6 +628,7 @@ namespace S3Browser
             if (fileItems.Count == 0)
             {
                 ReadAllParquetButton.Visibility = Visibility.Collapsed;
+                ReadAllParquetAsTableButton.Visibility = Visibility.Collapsed;
                 WriteQueryButton.Visibility = Visibility.Collapsed;
                 return;
             }
@@ -642,11 +644,13 @@ namespace S3Browser
             if (allParquetOrSuccess && hasParquetFiles)
             {
                 ReadAllParquetButton.Visibility = Visibility.Visible;
+                ReadAllParquetAsTableButton.Visibility = Visibility.Visible;
                 WriteQueryButton.Visibility = Visibility.Visible;
             }
             else
             {
                 ReadAllParquetButton.Visibility = Visibility.Collapsed;
+                ReadAllParquetAsTableButton.Visibility = Visibility.Collapsed;
                 WriteQueryButton.Visibility = Visibility.Collapsed;
             }
         }
@@ -671,6 +675,50 @@ namespace S3Browser
             }
             catch (Exception ex)
             {
+                MessageBox.Show($"Error opening parquet viewer: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ReadAllParquetAsTableButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_currentBucket == null)
+                    return;
+
+                // Calculate total size of parquet files in current folder (using already loaded size data)
+                var parquetFiles = Items.Where(item => item.Type == "File" && IsParquetFile(item.Name)).ToList();
+                long totalSizeBytes = parquetFiles.Sum(file => file.SizeInBytes);
+
+                // Check if total size exceeds 500MB (524,288,000 bytes)
+                const long maxSizeBytes = 500L * 1024L * 1024L;
+                if (totalSizeBytes > maxSizeBytes)
+                {
+                    string totalSizeFormatted = FileHelper.FormatFileSize(totalSizeBytes);
+                    StatusTextBlock.Text = "Folder too large for table mode";
+                    MessageBox.Show($"The total size of parquet files in this folder is {totalSizeFormatted}, which exceeds the 500 MB limit for table mode.\n\nPlease use 'Read All Parquet Files' (streaming mode) or 'Write Custom Query' instead.",
+                        "Folder Too Large", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                StatusTextBlock.Text = "Ready";
+
+                string wildcardPattern = string.IsNullOrEmpty(_currentPrefix)
+                    ? "*.parquet"
+                    : $"{_currentPrefix.TrimEnd('/')}/*.parquet";
+
+                string folderName = string.IsNullOrEmpty(_currentPrefix)
+                    ? _currentBucket
+                    : _currentPrefix.TrimEnd('/').Split('/').Last();
+
+                var viewer = new ParquetViewerWindow(_currentBucket, wildcardPattern, folderName, isWildcard: true, customQuery: null, loadAsTable: true);
+                viewer.Show();
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = "Error";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
                 MessageBox.Show($"Error opening parquet viewer: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
@@ -836,6 +884,12 @@ namespace S3Browser
         /// For files, shows size in B, KB, MB, GB, or TB. For folders and buckets, shows "--".
         /// </summary>
         public string Size { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the raw size in bytes.
+        /// For files, contains the actual byte count. For folders and buckets, is 0.
+        /// </summary>
+        public long SizeInBytes { get; set; }
 
         /// <summary>
         /// Gets or sets the last modified date/time formatted as "yyyy-MM-dd HH:mm" in local time.
