@@ -137,13 +137,6 @@
                        Foreground="Gray"
                        VerticalAlignment="Center"
                        Margin="0,0,20,0"/>
-            <Button x:Name="ExportGeoJsonButton"
-                    Content="Export Geometries to GeoJSON" 
-                    Width="220" 
-                    Height="30"
-                    Margin="0,0,10,0"
-                    Click="ExportGeoJsonButton_Click"
-                    IsEnabled="False"/>
             <Button Content="Close" 
                     Width="80" 
                     Height="30"

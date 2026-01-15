@@ -94,7 +94,6 @@ namespace S3Browser
         private readonly string _tableName = "parquet_data";
         private DuckDBConnection? _duckDbConnection;
         private CancellationTokenSource? _cancellationTokenSource;
-        private List<string> _geometryWktList = new();
         private Dictionary<int, List<GeometryMapWindow.GeometryInfo>> _rowGeometries = new(); // Map row index to geometries with column info
         private GeometryMapWindow? _currentMapWindow;
         private int _lastSelectedRowIndex = -1; // Track the last selected row for toggle behavior
@@ -379,9 +378,6 @@ namespace S3Browser
                     {
                         StatusTextBlock.Text = $"Loaded {rowCount:N0} rows (limited to {rowLimit:N0})";
                     }
-
-                    // Enable export button if there are geometries
-                    ExportGeoJsonButton.IsEnabled = _geometryWktList.Count > 0;
                 }
             }
             catch (OperationCanceledException)
@@ -665,91 +661,10 @@ namespace S3Browser
             }
         }
 
-        private void ExportGeoJsonButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_geometryWktList.Count == 0)
-            {
-                MessageBox.Show("No valid geometries found to export.", "No Geometries",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            var saveDialog = new SaveFileDialog
-            {
-                Filter = "GeoJSON files (*.geojson)|*.geojson|All files (*.*)|*.*",
-                FileName = $"{_fileName}_geometries.geojson",
-                DefaultExt = ".geojson"
-            };
-
-            if (saveDialog.ShowDialog() == true)
-            {
-                try
-                {
-                    ExportToGeoJson(saveDialog.FileName);
-                    MessageBox.Show($"Successfully exported {_geometryWktList.Count} geometries to:\n{saveDialog.FileName}\n\nYou can open this file in QGIS, ArcGIS, or any GIS application.",
-                        "Export Successful", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error exporting geometries: {ex.Message}", "Export Error",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-            }
-        }
-
-        private void ExportToGeoJson(string filePath)
-        {
-            var wktReader = new WKTReader();
-            var geoJsonWriter = new GeoJsonWriter();
-
-            var features = new List<object>();
-            int index = 0;
-
-            foreach (var wkt in _geometryWktList)
-            {
-                try
-                {
-                    var geometry = wktReader.Read(wkt);
-                    if (geometry != null && !geometry.IsEmpty)
-                    {
-                        var geoJsonString = geoJsonWriter.Write(geometry);
-                        var geometryObject = System.Text.Json.JsonSerializer.Deserialize<object>(geoJsonString);
-
-                        var feature = new
-                        {
-                            type = "Feature",
-                            id = index++,
-                            geometry = geometryObject ?? new { },
-                            properties = new { wkt = wkt }
-                        };
-                        features.Add(feature);
-                    }
-                }
-                catch
-                {
-                    // Skip invalid geometries
-                }
-            }
-
-            var featureCollection = new
-            {
-                type = "FeatureCollection",
-                features = features
-            };
-
-            var json = System.Text.Json.JsonSerializer.Serialize(featureCollection, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            });
-
-            File.WriteAllText(filePath, json, Encoding.UTF8);
-        }
-
         private void ProcessComplexColumns(DataTable dataTable)
         {
             var complexColumns = new List<DataColumn>();
             var geometryColumns = new Dictionary<DataColumn, bool>();
-            _geometryWktList.Clear(); // Reset geometry list
             _rowGeometries.Clear(); // Reset row geometries map
 
             // Identify complex columns and geometry columns
@@ -815,10 +730,9 @@ namespace S3Browser
                                     var wkt = ConvertGeometryToWkt(row[column]);
                                     newRow[column.ColumnName] = wkt;
 
-                                    // Store WKT for export (skip hex values and errors)
+                                    // Store WKT for map display
                                     if (!string.IsNullOrWhiteSpace(wkt) && !wkt.StartsWith("0x") && !wkt.StartsWith("[Error"))
                                     {
-                                        _geometryWktList.Add(wkt);
                                         rowGeometryList.Add(new GeometryMapWindow.GeometryInfo
                                         {
                                             Wkt = wkt,
