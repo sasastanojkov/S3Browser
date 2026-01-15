@@ -1,422 +1,337 @@
-# S3Browser
+# S3 Browser
 
-A modern WPF desktop application for browsing and viewing AWS S3 bucket contents with advanced support for Parquet files, tabular data (CSV/TSV), text files, and geometry visualization.
+A powerful Windows desktop application for browsing and analyzing data stored in Amazon S3 buckets. Built with .NET 8 and WPF, S3 Browser provides an intuitive interface for navigating S3 storage and viewing various file formats directly without downloading.
 
 ![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?logo=.net)
 ![WPF](https://img.shields.io/badge/WPF-Windows-0078D4?logo=windows)
 ![AWS S3](https://img.shields.io/badge/AWS-S3-FF9900?logo=amazon-aws)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-## Features
+## 🌟 What is S3 Browser?
 
-### ??? S3 Navigation
-- Browse AWS S3 buckets, folders, and files with an intuitive interface
-- Navigate using mouse double-click or keyboard (Enter key)
-- Direct S3 path navigation (e.g., `s3://bucket-name/path/to/folder`)
-- Breadcrumb navigation showing current location
-- Back navigation using ".." folder entries
+S3 Browser is a **read-only desktop tool** that makes working with Amazon S3 storage simple and efficient. Whether you're a data analyst, developer, or GIS professional, S3 Browser helps you quickly access, view, and analyze data stored in the cloud without downloading files to your local machine.
 
-### ?? Parquet File Support
-- View Parquet files directly from S3 using DuckDB engine
-- Query single Parquet files or entire folders with wildcard patterns
-- Configurable row limits (10, 100, 1K, 10K, 100K, or all rows)
-- Automatic geometry detection and visualization
-- Export geometries to GeoJSON format
-- Interactive map display for spatial data
+Think of it as a specialized file explorer for AWS S3 - browse buckets and folders, preview files, query data, and visualize geographic information, all from one intuitive application.
 
-### ?? File Viewers
-- **Text Files**: View `.txt`, `.json`, `.xml`, `.log`, `.md`, `.yaml`, `.sql`, and more
-- **CSV/TSV Files**: Tabular data viewer with header detection
-- **Parquet Files**: Advanced viewer with DuckDB query engine
-- All viewers support configurable read limits for large files
+## ✨ Key Capabilities
 
-### ??? Geometry Visualization
-- Automatic detection of WKT (Well-Known Text) geometry columns
-- Interactive map using OpenStreetMap tiles
-- Support for Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon
-- Color-coded geometry display with selection highlighting
-- Pan and zoom controls
-- Multiple geometry layer support per row
+### 📂 Browse S3 Like a File Explorer
+- Navigate S3 storage with familiar double-click and keyboard controls
+- Jump to any location by typing an S3 path (like `s3://my-bucket/data/2024/`)
+- Switch between AWS accounts using different profiles
+- Access public buckets without any credentials
+- Copy S3 paths with Ctrl+C for easy sharing
 
-### ? Performance Features
-- Lazy loading with configurable row limits
-- Concurrent DuckDB connections for parallel queries
-- Efficient S3 streaming for large files
-- Optimized map rendering (~60 FPS)
-- Geometry data caching
+### 📊 Powerful Parquet File Viewer
+Parquet files are commonly used for storing large datasets efficiently. S3 Browser gives you advanced tools to work with them:
 
-## Requirements
+- View Parquet data instantly without downloading the files
+- Query multiple files at once - perfect for partitioned datasets (folders with many .parquet files)
+- Write SQL queries to filter, sort, and analyze your data using DuckDB
+- Choose your data mode:
+  - **Streaming Mode**: For very large datasets (memory efficient)
+  - **Table Mode**: For datasets under 500MB (faster repeated queries)
+- Control data volume: Load 10, 100, 1,000, 10,000, 100,000 rows, or everything
+- Edit and re-run queries with a built-in SQL editor
 
-### System Requirements
-- **Operating System**: Windows 10/11 (64-bit)
-- **.NET Runtime**: .NET 8.0 Desktop Runtime
-- **Memory**: 4GB RAM minimum (8GB recommended for large Parquet files)
-- **Storage**: 100MB free disk space
+### 🗺️ Visualize Geographic Data
+Perfect for GIS professionals and anyone working with spatial data:
 
-### AWS Requirements
-- AWS account with S3 access
-- AWS CLI configured with SSO or IAM credentials
-- Appropriate IAM permissions for S3 bucket access:
-  - `s3:ListBucket`
-  - `s3:GetObject`
-  - `s3:GetObjectMetadata`
+- See your geometry data on a map - automatically detects WKB (Well-Known Binary) geometries in Parquet files
+- Display multiple geometries from different columns at the same time
+- Click to highlight specific geometries for focused inspection
+- Interactive map controls - zoom, pan, and explore your spatial data
+- Supports all common geometry types: Points, Lines, Polygons, and Multi-geometries
+- Row-to-map sync: Click any data row to instantly see its geometries on the map
 
-## Installation
+### 📄 View Text and Tabular Files
+Beyond Parquet, S3 Browser handles many common file formats:
 
-### Prerequisites
+**Text Files** (.txt, .json, .xml, .yaml, .log, .md, .sql, .js, .html, .css, .sh, .ps1, and more)
+- View configuration files
+- Inspect log files
+- Review code files
+- Check JSON/XML data
 
-1. **Install .NET 8.0 Desktop Runtime**
-   ```bash
-   # Download from Microsoft
-   https://dotnet.microsoft.com/download/dotnet/8.0
+**CSV and TSV Files**
+- Automatic delimiter detection
+- Toggle header row on/off
+- Smart cell expansion for long text
+- Row limiting options
+
+### 🎯 Smart Data Display Features
+- **Truncated cells with expand buttons** - long text is shortened with "..." buttons to view full content
+- **Copy complete cell data** with Ctrl+C, not just what's visible
+- **Expand All view** - see all your data in a comprehensive window
+- **Sortable columns** - click headers to sort
+- **Resizable columns** - adjust widths to fit your data
+- **File information** - see sizes, dates, and metadata
+
+### ⚡ Built for Performance
+- **Background operations** - all S3 operations run without freezing the UI
+- **Cancel anytime** - stop long-running operations with one click
+- **Progress indicators** - always know what's happening
+- **Smart cleanup** - temporary files are automatically deleted
+- **Clear error messages** - helpful suggestions when something goes wrong
+
+## 🎮 Getting Started
+
+### What You Need
+- **Windows 10 or 11** (64-bit)
+- **.NET 8.0 Runtime** - [Download from Microsoft](https://dotnet.microsoft.com/download/dotnet/8.0)
+- **AWS credentials** (for private buckets) OR just an **internet connection** (for public buckets)
+
+### First Time Setup
+
+**Option 1: Using with your AWS account**
+1. Install AWS CLI - [Download here](https://aws.amazon.com/cli/)
+2. Configure your credentials:
    ```
-
-2. **Install AWS CLI** (if using SSO)
-   ```bash
-   # Download from AWS
-   https://aws.amazon.com/cli/
-   ```
-
-3. **Configure AWS Profile**
-   ```bash
-   # For SSO
    aws configure sso
-   
-   # For IAM credentials
-   aws configure --profile your-profile-name
+   ```
+   OR
+   ```
+   aws configure --profile my-profile
+   ```
+3. Login if using SSO:
+   ```
+   aws sso login --profile my-profile
    ```
 
-### Building from Source
+**Option 2: Accessing public buckets**
+- No setup needed! Just select "Anonymous" mode when the app starts
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/S3Browser.git
-   cd S3Browser
-   ```
+### Launching the Application
 
-2. **Restore dependencies**
-   ```bash
-   dotnet restore
-   ```
+1. **Run S3Browser.exe**
+2. **Choose your access method**:
+   - Enter your AWS profile name, OR
+   - Check "Anonymous" for public buckets
+3. **Start browsing!**
 
-3. **Build the application**
-   ```bash
-   dotnet build --configuration Release
-   ```
+## 💡 How to Use
 
-4. **Run the application**
-   ```bash
-   dotnet run --project S3Browser
-   ```
+### Navigating Around
 
-   Or navigate to the output directory:
-   ```bash
-   cd S3Browser\bin\Release\net8.0-windows
-   S3Browser.exe
-   ```
+**Opening items:**
+- Double-click buckets, folders, or files
+- Or select an item and press Enter
 
-## Configuration
+**Going back:**
+- Click the ".." folder at the top
+- Or click the Home button to return to bucket list
 
-### Application Settings
+**Jump to a specific location:**
+- Type an S3 path in the navigation bar (e.g., `s3://my-bucket/data/`)
+- Press Enter to go there
 
-Edit `appsettings.json` to configure default settings:
+**Copy S3 paths:**
+- Select any bucket, folder, or file
+- Press Ctrl+C to copy its S3 path
 
-```json
-{
-  "AppSettings": {
-    "DefaultAwsProfile": "your-profile-name"
-  }
-}
+### Opening Files
+
+**Parquet Files** - Double-click opens the Parquet viewer
+- Choose how many rows to load (dropdown at top)
+- Click Reload to refresh with different settings
+- If the file has geometry columns, click any row to see them on a map
+
+**Folders with Parquet Files** - Click the "Read All Parquet Files" button
+- Opens all .parquet files in the folder as one dataset
+- Great for partitioned data (like data organized by date)
+- Choose between streaming mode (large data) or table mode (faster queries, max 500MB)
+
+**CSV or TSV Files** - Double-click opens the tabular viewer
+- Toggle "File has header" if needed
+- Choose how many rows to load
+- Click Reload to refresh
+
+**Text Files** - Double-click to view
+- Select read limit for large files
+- View JSON, XML, logs, code, and more
+
+### Working with Geographic Data
+
+When viewing Parquet files that contain geometry columns:
+
+1. **Open a Parquet file** with geometry data (WKB format)
+2. **Click any row** in the data grid
+3. **A map opens automatically** showing the geometries from that row
+4. **Click geometry buttons** in the sidebar to highlight specific ones
+5. **Click the same row again** to close the map
+
+The map supports: Points, Lines, Polygons, MultiPoints, MultiLineStrings, and MultiPolygons
+
+### Writing Custom SQL Queries
+
+For Parquet files and folders:
+
+1. Click the **"Write Custom Query"** button
+2. A SQL editor opens with a starter query
+3. Modify the query (use standard SQL syntax)
+4. Click **"Execute Query"** to see results
+5. Results open in a new viewer window
+
+**Example queries:**
+```sql
+-- Filter data
+SELECT * FROM read_parquet('s3://my-bucket/data/*.parquet')
+WHERE date >= '2024-01-01'
+LIMIT 1000
+
+-- Aggregate data
+SELECT category, COUNT(*) as count, AVG(value) as avg_value
+FROM read_parquet('s3://my-bucket/data/*.parquet')
+GROUP BY category
+ORDER BY count DESC
 ```
 
-**Configuration Options:**
-- `DefaultAwsProfile`: The AWS CLI profile name to use by default (pre-fills the profile selection dialog)
+## 🔍 Supported File Types
 
-### AWS Profile Setup
+| File Type | Extensions | Viewer Features |
+|-----------|-----------|-----------------|
+| **Parquet** | .parquet | SQL queries, streaming mode, table mode, geometry visualization |
+| **CSV** | .csv | Header detection, cell expansion, row limiting |
+| **TSV** | .tsv | Header detection, cell expansion, row limiting |
+| **Text** | .txt, .log, .md | Large file support with configurable limits |
+| **JSON** | .json | Formatted display |
+| **XML** | .xml | Formatted display |
+| **YAML** | .yaml, .yml | Formatted display |
+| **Code** | .js, .ts, .py, .sql, .html, .css | Syntax-aware viewing |
+| **Scripts** | .sh, .bat, .ps1 | Script viewing |
+| **Config** | .config, .ini, .properties | Configuration file viewing |
 
-#### For SSO Users:
-```bash
-# Configure SSO profile
-aws configure sso
+## 🎯 Common Use Cases
 
-# Login before starting the application
-aws sso login --profile your-profile-name
-```
+### For Data Analysts
+- Preview large Parquet datasets before downloading
+- Run quick SQL queries to check data quality
+- Filter and aggregate data without copying it locally
+- Verify data structure and content
 
-#### For IAM Users:
-```bash
-# Configure with access keys
-aws configure --profile your-profile-name
-# Enter: AWS Access Key ID
-# Enter: AWS Secret Access Key
-# Enter: Default region name
-# Enter: Default output format
-```
+### For GIS Professionals
+- Preview spatial datasets stored in S3
+- Visualize geometry data on interactive maps
+- Check coordinate systems and data extent
+- Validate geometry data from processing pipelines
 
-## Usage
+### For Developers
+- Inspect log files directly from S3
+- Review JSON/XML configuration files
+- Debug data pipeline outputs
+- Check intermediate processing results
 
-### Starting the Application
+### For DevOps Engineers
+- Browse and organize S3 storage
+- Monitor file sizes and modification dates
+- Work across multiple AWS accounts
+- Quick access to stored artifacts and logs
 
-1. **Ensure AWS credentials are active**
-   ```bash
-   # For SSO users
-   aws sso login --profile your-profile-name
-   ```
+## 💡 Tips & Best Practices
 
-2. **Launch S3Browser.exe**
+### Performance Tips
+- **Start small**: Use 10 or 100 row limits for initial previews
+- **Use Table Mode**: For datasets under 500MB when you need multiple queries
+- **Close unused windows**: Free up memory by closing viewers you're not using
+- **Filter early**: In custom queries, use WHERE clauses to limit data before loading
 
-3. **Select AWS Profile**
-   - Enter your AWS profile name in the dialog
-   - Click OK to connect
+### Navigation Tips
+- **Bookmark paths**: Save frequently used S3 paths in a text file
+- **Use the path bar**: Type paths directly instead of clicking through folders
+- **Ctrl+C everywhere**: Works on any selected item to copy its S3 path
 
-### Navigation
+### Query Writing Tips
+- **Test with LIMIT**: Add `LIMIT 100` to queries while testing
+- **Use wildcards wisely**: `s3://bucket/path/*.parquet` reads all files in a folder
+- **Standard SQL works**: DuckDB supports most common SQL features
+- **Filter before aggregating**: Use WHERE before GROUP BY for better performance
 
-#### Mouse Navigation:
-- **Double-click** a bucket to open it
-- **Double-click** a folder to navigate into it
-- **Double-click** a file to open the appropriate viewer
-- **Double-click** ".." to go back
+### Geometry Tips
+- **Check coordinate system**: Geometries should be in WGS84 (EPSG:4326) for best results
+- **Toggle selection**: Click a row once to open map, click again to close
+- **Use highlight buttons**: Click geometry buttons to focus on specific columns
+- **Zoom controls**: Mouse wheel zooms, click-and-drag pans the map
 
-#### Keyboard Navigation:
-- Use **Arrow Keys** to select items
-- Press **Enter** to open the selected item
-- Type an S3 path in the path bar and press **Enter**
+## ⚠️ Important Things to Know
 
-#### Path Navigation:
-```
-s3://my-bucket
-s3://my-bucket/my-folder/
-s3://my-bucket/path/to/file.parquet
-s3a://my-bucket/path/  (alternate format)
-```
+- **Read-Only Application**: S3 Browser never modifies or deletes your S3 data
+- **No Full Downloads**: Files are streamed directly (except CSV/TSV which download temporarily)
+- **Temporary Files**: CSV/TSV files are downloaded temporarily and auto-deleted when you close the viewer
+- **Memory Usage**: Table mode loads data into RAM - large datasets will use system memory
+- **Internet Required**: Map tiles need internet connection to display
 
-### Viewing Files
+## 🛠️ Troubleshooting
 
-#### Parquet Files
-1. Double-click or press Enter on a `.parquet` file
-2. Select row limit from dropdown (10, 100, 1K, 10K, 100K, All)
-3. Click "Reload" to refresh with new limit
-4. If geometries detected:
-   - Select a row to view geometries on map
-   - Click geometry buttons to highlight specific geometries
-   - Use "Export Geometries to GeoJSON" to save spatial data
+### "Could not load AWS credentials"
+**Solution:**
+1. Make sure AWS CLI is installed
+2. Run: `aws configure` or `aws sso login --profile your-profile`
+3. Verify with: `aws sts get-caller-identity --profile your-profile`
 
-#### Parquet Folders (Wildcard Query)
-1. Navigate to a folder containing only `.parquet` files
-2. Click the **"?? Read All Parquet Files in Folder"** button
-3. DuckDB will query all Parquet files using a wildcard pattern
-4. Perfect for partitioned Parquet datasets
-
-#### CSV/TSV Files
-1. Double-click a `.csv` or `.tsv` file
-2. Toggle "File has header" checkbox if needed
-3. Select row limit
-4. Click "Reload" to refresh
-
-#### Text Files
-1. Double-click any supported text file
-2. Select read limit (1KB, 10KB, 100KB, 1MB, Full)
-3. Click "Load" to refresh
-
-### Working with Geometries
-
-The application automatically detects WKT geometry columns in Parquet files:
-
-**Supported Geometry Types:**
-- POINT
-- LINESTRING
-- POLYGON
-- MULTIPOINT
-- MULTILINESTRING
-- MULTIPOLYGON
-
-**Map Controls:**
-- **Mouse Drag**: Pan the map
-- **Mouse Wheel**: Zoom in/out
-- **Geometry Buttons**: Click to highlight specific geometries
-- **Row Selection**: Select different rows to load new geometries
-
-**Export Options:**
-- Click "Export Geometries to GeoJSON"
-- Choose save location
-- Open in QGIS, ArcGIS, or any GIS application
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| **Enter** | Open selected item (bucket/folder/file) |
-| **Arrow Keys** | Navigate through items |
-| **Ctrl+V** | Paste S3 path (in path textbox) |
-| **Escape** | Close dialog windows |
-
-## Supported File Types
-
-### Text Files
-`.txt`, `.json`, `.xml`, `.log`, `.md`, `.yaml`, `.yml`, `.config`, `.ini`, `.properties`, `.html`, `.htm`, `.css`, `.js`, `.ts`, `.sql`, `.sh`, `.bat`, `.ps1`
-
-### Tabular Files
-- `.csv` - Comma-Separated Values
-- `.tsv` - Tab-Separated Values
-
-### Binary Files
-- `.parquet` - Apache Parquet columnar format
-
-## Architecture
-
-### Technology Stack
-- **UI Framework**: WPF (.NET 8)
-- **S3 Access**: AWS SDK for .NET
-- **Parquet Engine**: DuckDB with httpfs extension
-- **Map Rendering**: Mapsui 5.0 with SkiaSharp
-- **Geometry Processing**: NetTopologySuite
-- **Configuration**: Microsoft.Extensions.Configuration
-
-### Project Structure
-```
-S3Browser/
-??? MainWindow.xaml.cs          # Main browser window
-??? ParquetViewerWindow.xaml.cs # Parquet file viewer
-??? TabularFileViewerWindow.xaml.cs # CSV/TSV viewer
-??? FileViewerWindow.xaml.cs    # Text file viewer
-??? GeometryMapWindow.xaml.cs   # Interactive map
-??? ProfileSelectionDialog.xaml.cs # AWS profile selector
-??? Services/
-?   ??? AwsCredentialService.cs # AWS authentication
-?   ??? FileTypeService.cs      # File type detection
-??? Helpers/
-?   ??? FileHelper.cs           # File utilities
-?   ??? DataGridTemplateHelper.cs # UI templates
-??? Converters/
-?   ??? TextTruncateConverter.cs # Data binding converters
-??? Constants/
-?   ??? AppConstants.cs         # Application constants
-??? appsettings.json            # Configuration file
-```
-
-## Troubleshooting
-
-### AWS Authentication Errors
-
-**Problem**: "Could not load AWS credentials"
-
+### "Error loading parquet file"
 **Solutions:**
-1. Ensure AWS CLI is installed
-2. Run `aws sso login --profile your-profile-name`
-3. Verify profile exists: `aws configure list-profiles`
-4. Check credentials: `aws sts get-caller-identity --profile your-profile-name`
+- Verify the file is valid Parquet format
+- Check you have S3 read permissions (s3:GetObject)
+- Try reducing the row limit
+- Use streaming mode instead of table mode
 
-### Parquet Query Errors
-
-**Problem**: "Error loading parquet file"
-
+### Map not showing anything
 **Solutions:**
-1. Check file is valid Parquet format
-2. Verify S3 permissions (s3:GetObject)
-3. Try reducing row limit
-4. Check DuckDB logs in debug output
+- Check geometry data is in WKT format
+- Verify coordinates are in WGS84 (latitude/longitude range: -180 to 180, -90 to 90)
+- Make sure you have internet connection for map tiles
+- Try closing and reopening the map window
 
-### Map Display Issues
-
-**Problem**: Geometries not visible or map blank
-
+### Application is slow
 **Solutions:**
-1. Verify geometry data is valid WKT format
-2. Check geometry coordinates are in WGS84 (latitude/longitude)
-3. Ensure internet connection for map tiles
-4. Try zooming out or clicking "Zoom to Extent"
+- Use row limits instead of loading all data
+- Close viewer windows you're not using
+- Use streaming mode for very large datasets
+- Check your internet connection speed
 
-### Performance Issues
+## 📞 Getting Help
 
-**Problem**: Application slow with large files
+- **Check this README** for answers to common questions
+- **Review Troubleshooting** section above
+- **Open an issue** on [GitHub](https://github.com/sasastanojkov/S3Browser/issues)
+- **Check existing issues** - someone may have already solved your problem
 
-**Solutions:**
-1. Use row limits instead of loading all rows
-2. Close unused viewer windows
-3. Increase system memory allocation
-4. Use wildcard queries for partitioned Parquet datasets
+## 🤝 Contributing
 
-## Dependencies
-
-The application uses the following NuGet packages:
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| AWSSDK.S3 | 4.0.16 | AWS S3 access |
-| AWSSDK.SSO | 4.0.2.8 | AWS SSO support |
-| AWSSDK.SSOOIDC | 4.0.3.9 | AWS SSO OIDC |
-| DuckDB.NET.Data.Full | 1.1.3 | Parquet query engine |
-| NetTopologySuite | 2.5.0 | Geometry processing |
-| NetTopologySuite.IO.GeoJSON | 4.0.0 | GeoJSON export |
-| Mapsui | 5.0.0-beta.3 | Map rendering |
-| Mapsui.Nts | 5.0.0-beta.3 | NTS integration |
-| Mapsui.Rendering.Skia | 5.0.0-beta.3 | Skia renderer |
-| Mapsui.Tiling | 5.0.0-beta.3 | Tile layer support |
-| SkiaSharp.Views.WPF | 2.88.8 | WPF rendering |
-| Microsoft.Extensions.Configuration | 8.0.0 | Configuration |
-| Microsoft.Extensions.Configuration.Json | 8.0.0 | JSON config |
-
-## Contributing
-
-Contributions are welcome! Please follow these guidelines:
+Want to help make S3 Browser better? Contributions are welcome!
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make your changes
+4. Commit with clear messages: `git commit -m 'Add awesome feature'`
+5. Push to your fork: `git push origin feature/my-feature`
+6. Open a Pull Request
 
-### Code Style
-- Follow C# naming conventions (PascalCase for public members)
-- Add XML documentation for public APIs
-- Include unit tests for new features
-- Ensure all builds pass before submitting PR
-
-## License
+## 📜 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Acknowledgments
+## 🙏 Built With
 
-- **DuckDB** - Fast analytical query engine
-- **Mapsui** - Cross-platform map component
-- **NetTopologySuite** - Geometry processing library
-- **AWS SDK** - Amazon Web Services integration
-- **OpenStreetMap** - Map tile provider
+S3 Browser uses these excellent open-source libraries:
 
-## Support
+- **[DuckDB](https://duckdb.org/)** - Lightning-fast analytical query engine for Parquet files
+- **[Mapsui](https://mapsui.com/)** - Cross-platform map rendering library
+- **[NetTopologySuite](https://github.com/NetTopologySuite/NetTopologySuite)** - Geometry processing and spatial operations
+- **[AWS SDK for .NET](https://aws.amazon.com/sdk-for-net/)** - Official AWS integration
+- **[OpenStreetMap](https://www.openstreetmap.org/)** - Community-driven map tile provider
 
-For issues, questions, or feature requests:
-- Open an issue on GitHub
-- Check existing documentation
-- Review troubleshooting section
+## 📊 Technology Stack
 
-## Version History
-
-### v1.0.0 (Current)
-- Initial release
-- S3 bucket browsing
-- Parquet file viewer with DuckDB
-- CSV/TSV viewer
-- Text file viewer
-- Geometry map visualization
-- GeoJSON export
-- AWS SSO support
-
-## Roadmap
-
-### Planned Features
-- [ ] File upload to S3
-- [ ] Folder download
-- [ ] S3 object metadata editor
-- [ ] SQL query builder for Parquet files
-- [ ] Multiple map projections
-- [ ] Bookmark favorite S3 locations
-- [ ] Search functionality
-- [ ] File preview thumbnails
-- [ ] Dark mode theme
-- [ ] Export to multiple formats (CSV, Excel, Shapefile)
+- **.NET 8** - Modern, cross-platform framework
+- **WPF** - Rich desktop UI framework
+- **DuckDB** - Embedded analytical database
+- **AWS SDK** - S3 integration
+- **Mapsui + SkiaSharp** - Map rendering
+- **NetTopologySuite** - Geometry operations
 
 ---
 
-**Built with ?? using .NET 8 and WPF**
+**Built with ❤️ for the data community**
+
+For more information, visit the [GitHub repository](https://github.com/sasastanojkov/S3Browser)
