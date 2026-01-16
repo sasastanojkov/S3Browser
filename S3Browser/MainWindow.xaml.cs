@@ -1,7 +1,8 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
+using Microsoft.Win32;
 using S3Browser.Helpers;
 using S3Browser.Services;
 
@@ -143,6 +144,7 @@ namespace S3Browser
         }
 
         private CancellationTokenSource? _loadingCancellationTokenSource;
+        private CancellationTokenSource? _downloadCancellationTokenSource;
 
         private async Task LoadBucketContentsAsync(string bucketName, string prefix = "")
         {
@@ -206,6 +208,7 @@ namespace S3Browser
                 }
 
                 CheckAndShowReadAllParquetButton();
+                CheckAndShowDownloadAllButton();
                 UpdateBreadcrumb();
 
                 // Update status
@@ -655,6 +658,19 @@ namespace S3Browser
             }
         }
 
+        private void CheckAndShowDownloadAllButton()
+        {
+            // Show Download All button only when browsing folders (not at bucket level)
+            if (_currentBucket != null)
+            {
+                DownloadAllButton.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                DownloadAllButton.Visibility = Visibility.Collapsed;
+            }
+        }
+
         private void ReadAllParquetButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -860,6 +876,194 @@ namespace S3Browser
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
+        }
+
+        private void ExitMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            Application.Current.Shutdown();
+        }
+
+        private async void DownloadAllButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentBucket == null)
+                return;
+
+            // Ask user to select download location
+            var dialog = new OpenFolderDialog
+            {
+                Title = "Select folder to save downloaded files",
+                Multiselect = false
+            };
+
+            if (dialog.ShowDialog() != true)
+                return;
+
+            string downloadPath = dialog.FolderName;
+
+            // Create a folder name based on current location
+            string folderName;
+            if (string.IsNullOrEmpty(_currentPrefix))
+            {
+                folderName = _currentBucket;
+            }
+            else
+            {
+                folderName = _currentPrefix.TrimEnd('/').Split('/').Last();
+            }
+
+            string targetPath = Path.Combine(downloadPath, folderName);
+
+            // Confirm with user
+            var result = MessageBox.Show(
+                $"Download all files from:\ns3://{_currentBucket}/{_currentPrefix}\n\nTo:\n{targetPath}\n\nThis will download all files recursively and preserve folder structure.\n\nContinue?",
+                "Confirm Download",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            // Start download
+            await DownloadAllFilesAsync(targetPath);
+        }
+
+        private async Task DownloadAllFilesAsync(string targetPath)
+        {
+            // Cancel any existing download
+            _downloadCancellationTokenSource?.Cancel();
+            _downloadCancellationTokenSource = new CancellationTokenSource();
+            var cancellationToken = _downloadCancellationTokenSource.Token;
+
+            try
+            {
+                // Create target directory
+                Directory.CreateDirectory(targetPath);
+
+                // Disable UI elements during download
+                DownloadAllButton.IsEnabled = false;
+                StatusTextBlock.Text = "Discovering files...";
+                StatusProgressBar.Visibility = Visibility.Visible;
+
+                // Discover all files recursively
+                var allFiles = await DiscoverAllFilesAsync(_currentBucket!, _currentPrefix, cancellationToken);
+
+                if (allFiles.Count == 0)
+                {
+                    MessageBox.Show("No files found to download.", "Download Complete",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                // Calculate total size
+                long totalBytes = allFiles.Sum(f => f.Size);
+                string totalSizeFormatted = FileHelper.FormatFileSize(totalBytes);
+
+                StatusTextBlock.Text = $"Downloading {allFiles.Count} files ({totalSizeFormatted})...";
+
+                // Download all files
+                int downloadedCount = 0;
+                long downloadedBytes = 0;
+
+                foreach (var fileInfo in allFiles)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    // Calculate relative path
+                    string relativePath = fileInfo.FullKey;
+                    if (!string.IsNullOrEmpty(_currentPrefix))
+                    {
+                        relativePath = fileInfo.FullKey.Substring(_currentPrefix.Length);
+                    }
+
+                    // Create full local path
+                    string localFilePath = Path.Combine(targetPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+                    // Create directory if needed
+                    string? directory = Path.GetDirectoryName(localFilePath);
+                    if (!string.IsNullOrEmpty(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
+
+                    // Download file
+                    try
+                    {
+                        using (var response = await S3Manager.Instance.GetObjectAsync(_currentBucket!, fileInfo.FullKey))
+                        {
+                            await response.WriteResponseStreamToFileAsync(localFilePath, false, cancellationToken);
+                        }
+
+                        downloadedCount++;
+                        downloadedBytes += fileInfo.Size;
+
+                        // Update status
+                        double progress = (double)downloadedCount / allFiles.Count * 100;
+                        string downloadedSize = FileHelper.FormatFileSize(downloadedBytes);
+                        StatusTextBlock.Text = $"Downloading: {downloadedCount}/{allFiles.Count} files ({downloadedSize}/{totalSizeFormatted}) - {progress:F1}%";
+                        ItemCountTextBlock.Text = $"Current: {Path.GetFileName(localFilePath)}";
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to download {fileInfo.FullKey}: {ex.Message}");
+                        // Continue with next file
+                    }
+                }
+
+                StatusTextBlock.Text = $"Download complete: {downloadedCount} files ({FileHelper.FormatFileSize(downloadedBytes)})";
+                ItemCountTextBlock.Text = "";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
+
+                MessageBox.Show(
+                    $"Successfully downloaded {downloadedCount} of {allFiles.Count} files to:\n{targetPath}",
+                    "Download Complete",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                StatusTextBlock.Text = "Download cancelled";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
+                ItemCountTextBlock.Text = "";
+                MessageBox.Show("Download was cancelled.", "Cancelled", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = "Download failed";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
+                ItemCountTextBlock.Text = "";
+                MessageBox.Show($"Error during download: {ex.Message}", "Download Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                DownloadAllButton.IsEnabled = true;
+            }
+        }
+
+        private async Task<List<S3FileInfo>> DiscoverAllFilesAsync(string bucketName, string prefix, CancellationToken cancellationToken)
+        {
+            var allFiles = new List<S3FileInfo>();
+            var foldersToProcess = new Queue<string>();
+            foldersToProcess.Enqueue(prefix);
+
+            while (foldersToProcess.Count > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string currentPrefix = foldersToProcess.Dequeue();
+                var result = await S3Manager.Instance.ListObjectsAsync(bucketName, currentPrefix);
+
+                // Add files from current folder
+                allFiles.AddRange(result.Files);
+
+                // Add subfolders to process
+                foreach (var folder in result.Folders)
+                {
+                    foldersToProcess.Enqueue(folder.FullKey);
+                }
+            }
+
+            return allFiles;
         }
     }
 

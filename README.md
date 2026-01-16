@@ -21,6 +21,7 @@ Think of it as a specialized file explorer for AWS S3 - browse buckets and folde
 - Switch between AWS accounts using different profiles
 - Access public buckets without any credentials
 - Copy S3 paths with Ctrl+C for easy sharing
+- Download entire folders recursively** - preserves folder hierarchy
 
 ### 📊 Powerful Parquet File Viewer
 Parquet files are commonly used for storing large datasets efficiently. S3 Browser gives you advanced tools to work with them:
