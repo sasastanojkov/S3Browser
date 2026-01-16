@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Input;
-using S3Browser.Services;
 
 namespace S3Browser
 {

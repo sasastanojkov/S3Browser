@@ -44,11 +44,59 @@ namespace S3Browser
             try
             {
                 var credentialChain = new CredentialProfileStoreChain();
-                var profiles = credentialChain.ListProfiles();
 
-                foreach (var profile in profiles.OrderBy(p => p.Name))
+                List<string> validProfileNames = new List<string>();
+
+                try
                 {
-                    ProfileComboBox.Items.Add(profile.Name);
+                    // Try to get all profiles
+                    var profiles = credentialChain.ListProfiles();
+
+                    // Validate each profile and only add ones that can be accessed
+                    foreach (var profile in profiles.OrderBy(p => p.Name))
+                    {
+                        try
+                        {
+                            // Try to validate the profile by attempting to get credentials info
+                            // This will skip profiles with SSO configuration errors
+                            if (credentialChain.TryGetProfile(profile.Name, out _))
+                            {
+                                validProfileNames.Add(profile.Name);
+                            }
+                        }
+                        catch
+                        {
+                            // Skip profiles that have configuration errors
+                            System.Diagnostics.Debug.WriteLine($"Skipping invalid profile: {profile.Name}");
+                        }
+                    }
+                }
+                catch (Amazon.Runtime.AmazonClientException ex) when (ex.Message.Contains("sso_session"))
+                {
+                    // Handle SSO session configuration errors
+                    System.Diagnostics.Debug.WriteLine($"SSO configuration error: {ex.Message}");
+
+                    // Try to load profiles from the credentials file directly (skip config file with SSO errors)
+                    try
+                    {
+                        var credentialsFile = new SharedCredentialsFile();
+                        var credProfiles = credentialsFile.ListProfiles();
+
+                        foreach (var profile in credProfiles.OrderBy(p => p.Name))
+                        {
+                            validProfileNames.Add(profile.Name);
+                        }
+                    }
+                    catch
+                    {
+                        // If even credentials file fails, we'll show a message
+                    }
+                }
+
+                // Add valid profiles to ComboBox
+                foreach (var profileName in validProfileNames)
+                {
+                    ProfileComboBox.Items.Add(profileName);
                 }
 
                 // Set default profile from configuration if it exists, otherwise select first available
@@ -61,12 +109,35 @@ namespace S3Browser
                 {
                     ProfileComboBox.SelectedIndex = 0;
                 }
+
+                // Show helpful message if no valid profiles were found
+                if (ProfileComboBox.Items.Count == 0)
+                {
+                    MessageBox.Show(
+                        "No valid AWS profiles were found.\n\n" +
+                        "Common causes:\n" +
+                        " - SSO session configuration errors in ~/.aws/config\n" +
+                        " - Missing or invalid credentials\n\n" +
+                        "You can:\n" +
+                        " - Enter a profile name manually in the text box\n" +
+                        " - Use Anonymous access for public buckets\n" +
+                        " - Fix your AWS configuration files",
+                        "No Profiles Available",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
             }
             catch (Exception ex)
             {
                 // If we can't load profiles, the ComboBox will be empty but still editable
-                MessageBox.Show($"Could not load AWS profiles: {ex.Message}\n\nYou can still enter a profile name manually.",
-                    "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(
+                    $"Could not load AWS profiles: {ex.Message}\n\n" +
+                    "You can still:\n" +
+                    " - Enter a profile name manually\n" +
+                    " - Use Anonymous access for public buckets",
+                    "Warning",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
             }
         }
 
