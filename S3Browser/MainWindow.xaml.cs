@@ -106,7 +106,6 @@ namespace S3Browser
                     {
                         Type = "Bucket",
                         Name = isPublic ? $"{bucket.BucketName} (Public)" : bucket.BucketName,
-                        Size = "--",
                         LastModified = bucket.CreationDate?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Unknown"
                     });
                 }
@@ -176,7 +175,6 @@ namespace S3Browser
                 {
                     Type = "Folder",
                     Name = "..",
-                    Size = "--",
                     LastModified = "--"
                 });
 
@@ -187,7 +185,6 @@ namespace S3Browser
                     {
                         Type = "Folder",
                         Name = folder.Name,
-                        Size = "--",
                         LastModified = "--",
                         FullKey = folder.FullKey
                     });
@@ -200,7 +197,6 @@ namespace S3Browser
                     {
                         Type = "File",
                         Name = file.Name,
-                        Size = FileHelper.FormatFileSize(file.Size),
                         SizeInBytes = file.Size,
                         LastModified = file.LastModified?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Unknown",
                         FullKey = file.FullKey
@@ -488,6 +484,41 @@ namespace S3Browser
 
                 var (bucketName, key) = parsedPath.Value;
 
+                // Check if the key contains wildcard characters (*, ?)
+                if (!string.IsNullOrEmpty(key) && (key.Contains('*') || key.Contains('?')))
+                {
+                    StatusTextBlock.Text = "Opening parquet viewer with wildcard pattern...";
+                    StatusProgressBar.Visibility = Visibility.Collapsed;
+
+                    // Extract folder name from the pattern for display
+                    string folderName;
+
+                    // Try to find the last directory name before the wildcard
+                    var pathParts = key.Split('/');
+                    var nonWildcardParts = pathParts.TakeWhile(part => !part.Contains('*') && !part.Contains('?')).ToList();
+
+                    if (nonWildcardParts.Count > 0)
+                    {
+                        folderName = nonWildcardParts.Last();
+                    }
+                    else
+                    {
+                        folderName = bucketName;
+                    }
+
+                    if (string.IsNullOrEmpty(folderName))
+                    {
+                        folderName = bucketName;
+                    }
+
+                    // Open ParquetViewerWindow with wildcard pattern
+                    var viewer = new ParquetViewerWindow(bucketName, key, folderName, isWildcard: true);
+                    viewer.Show();
+
+                    StatusTextBlock.Text = "Ready";
+                    return;
+                }
+
                 if (!string.IsNullOrEmpty(key))
                 {
                     try
@@ -501,7 +532,7 @@ namespace S3Browser
                         {
                             Type = "File",
                             Name = fileName,
-                            Size = FileHelper.FormatFileSize(metadata.ContentLength),
+                            SizeInBytes = metadata.ContentLength,
                             LastModified = metadata.LastModified?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Unknown",
                             FullKey = key
                         };
@@ -705,7 +736,7 @@ namespace S3Browser
 
                 // Calculate total size of parquet files in current folder (using already loaded size data)
                 var parquetFiles = Items.Where(item => item.Type == "File" && IsParquetFile(item.Name)).ToList();
-                long totalSizeBytes = parquetFiles.Sum(file => file.SizeInBytes);
+                long totalSizeBytes = parquetFiles.Sum(file => file.SizeInBytes ?? 0);
 
                 // Check if total size exceeds 500MB (524,288,000 bytes)
                 const long maxSizeBytes = 500L * 1024L * 1024L;
@@ -1084,16 +1115,17 @@ namespace S3Browser
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// Gets or sets the formatted size of the item.
-        /// For files, shows size in B, KB, MB, GB, or TB. For folders and buckets, shows "--".
+        /// Gets or sets the raw size in bytes.
+        /// For files, contains the actual byte count. For folders and buckets, is null.
         /// </summary>
-        public string Size { get; set; } = string.Empty;
+        public long? SizeInBytes { get; set; }
 
         /// <summary>
-        /// Gets or sets the raw size in bytes.
-        /// For files, contains the actual byte count. For folders and buckets, is 0.
+        /// Gets the formatted size of the item.
+        /// For files, shows size in B, KB, MB, GB, or TB. For folders and buckets, shows "--".
+        /// Automatically computed from SizeInBytes.
         /// </summary>
-        public long SizeInBytes { get; set; }
+        public string Size => SizeInBytes.HasValue ? FileHelper.FormatFileSize(SizeInBytes.Value) : "--";
 
         /// <summary>
         /// Gets or sets the last modified date/time formatted as "yyyy-MM-dd HH:mm" in local time.

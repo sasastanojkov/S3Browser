@@ -16,12 +16,20 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" 
-                   x:Name="FileNameTextBlock"
-                   FontSize="16" 
-                   FontWeight="Bold" 
-                   Margin="10"
-                   TextWrapping="Wrap"/>
+        <Border Grid.Row="0"
+                Background="#FFF0F0F0"
+                BorderBrush="#FFCCCCCC"
+                BorderThickness="0,0,0,1"
+                Padding="10"
+                Cursor="Hand"
+                ToolTip="Click to copy S3 path to clipboard"
+                MouseLeftButtonDown="FilePathBorder_MouseLeftButtonDown">
+            <TextBlock x:Name="FileNameTextBlock"
+                       FontSize="13" 
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap"
+                       Foreground="#FF1976D2"/>
+        </Border>
 
         <Grid Grid.Row="1" Margin="10,0,10,10">
             <Grid.ColumnDefinitions>

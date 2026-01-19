@@ -47,18 +47,16 @@
                     BorderBrush="#FFCCCCCC"
                     BorderThickness="1"
                     Background="White">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Auto">
-                    <TextBox x:Name="QueryTextBox"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             FontFamily="Consolas"
-                             FontSize="13"
-                             Padding="10"
-                             BorderThickness="0"
-                             VerticalAlignment="Stretch"
-                             MinHeight="200"/>
-                </ScrollViewer>
+                <TextBox x:Name="QueryTextBox"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         FontFamily="Consolas"
+                         FontSize="13"
+                         Padding="10"
+                         BorderThickness="0"
+                         VerticalAlignment="Stretch"
+                         VerticalScrollBarVisibility="Disabled"
+                         HorizontalScrollBarVisibility="Disabled"/>
             </Border>
 
             <!-- Error/Status Message -->

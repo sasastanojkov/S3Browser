@@ -33,15 +33,17 @@ namespace S3Browser
             {
                 var firstLine = text.Split('\n')[0];
 
-                // If first line is longer than 50 chars, truncate it
-                if (firstLine.Length > 50)
-                    return firstLine.Substring(0, 50);
+                // If first line is longer than 50 text elements (proper Unicode handling), truncate it
+                var stringInfo = new StringInfo(firstLine);
+                if (stringInfo.LengthInTextElements > 50)
+                    return stringInfo.SubstringByTextElements(0, 50);
                 return firstLine;
             }
 
-            // If text is longer than 50 characters, truncate
-            if (text.Length > 50)
-                return text.Substring(0, 50);
+            // If text is longer than 50 text elements (proper Unicode handling), truncate
+            var textStringInfo = new StringInfo(text);
+            if (textStringInfo.LengthInTextElements > 50)
+                return textStringInfo.SubstringByTextElements(0, 50);
 
             // Otherwise show full text
             return text;
@@ -97,6 +99,7 @@ namespace S3Browser
         private Dictionary<int, List<GeometryMapWindow.GeometryInfo>> _rowGeometries = new(); // Map row index to geometries with column info
         private GeometryMapWindow? _currentMapWindow;
         private int _lastSelectedRowIndex = -1; // Track the last selected row for toggle behavior
+        private string _displayPath = string.Empty; // The S3 path to display and copy
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ParquetViewerWindow"/> class.
@@ -124,32 +127,23 @@ namespace S3Browser
             // Subscribe to keyboard events for copy functionality
             ResultsDataGrid.PreviewKeyDown += ResultsDataGrid_PreviewKeyDown;
 
-            // Create a dedicated DuckDB connection for this window with S3 access
-            InitializeDuckDbConnectionAsync();
-
-            if (!string.IsNullOrEmpty(_customQuery))
+            // Build the S3 path that will be used
+            if (_isWildcard)
             {
-                FileNameTextBlock.Text = $"Custom Query: {fileName}";
-                Title = $"Query: {fileName}";
-            }
-            else if (_isWildcard)
-            {
-                if (_loadAsTable)
-                {
-                    FileNameTextBlock.Text = $"Parquet Table: {fileName}";
-                    Title = $"{fileName}/* (Table Mode)";
-                }
-                else
-                {
-                    FileNameTextBlock.Text = $"Parquet Files in: {fileName}";
-                    Title = $"{fileName}/*";
-                }
+                var prefix = _key.Replace("*.parquet", "");
+                _displayPath = $"s3://{_bucketName}/{prefix}*.parquet";
             }
             else
             {
-                FileNameTextBlock.Text = $"Parquet File: {fileName}";
-                Title = fileName;
+                _displayPath = $"s3://{_bucketName}/{_key}";
             }
+
+            // Set display text and title
+            FileNameTextBlock.Text = _displayPath;
+            Title = fileName;
+
+            // Create a dedicated DuckDB connection for this window with S3 access
+            InitializeDuckDbConnectionAsync();
         }
 
         private async void InitializeDuckDbConnectionAsync()
@@ -804,17 +798,163 @@ namespace S3Browser
 
             try
             {
+                // First, try to extract the actual value from DuckDB types
+                var extractedValue = ExtractValueFromDuckDbType(value);
+
                 var options = new JsonSerializerOptions
                 {
                     WriteIndented = true,
                     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
                 };
-                return JsonSerializer.Serialize(value, options);
+                return JsonSerializer.Serialize(extractedValue, options);
             }
-            catch
+            catch (Exception ex)
             {
+                // If JSON serialization fails, try to get a readable string representation
+                System.Diagnostics.Debug.WriteLine($"Failed to serialize to JSON: {ex.Message}");
                 return value.ToString() ?? "";
             }
+        }
+
+        private object ExtractValueFromDuckDbType(object value)
+        {
+            if (value == null) return "null";
+
+            var type = value.GetType();
+            var typeName = type.FullName ?? type.Name;
+
+            // Check if this is a generic Dictionary type (like Dictionary`2)
+            if (type.IsGenericType)
+            {
+                var genericTypeDef = type.GetGenericTypeDefinition();
+
+                // Handle Dictionary<TKey, TValue>
+                if (genericTypeDef == typeof(Dictionary<,>) ||
+                    typeName.Contains("Dictionary") ||
+                    type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(System.Collections.Generic.IDictionary<,>)))
+                {
+                    var dict = new Dictionary<string, object>();
+
+                    // Try to use IDictionary interface
+                    if (value is System.Collections.IDictionary idict)
+                    {
+                        foreach (System.Collections.DictionaryEntry entry in idict)
+                        {
+                            var key = entry.Key?.ToString() ?? "null";
+                            var val = entry.Value != null ? ExtractValueFromDuckDbType(entry.Value) : "null";
+                            dict[key] = val;
+                        }
+                        return dict;
+                    }
+
+                    // Fallback: use reflection to get Keys and Values properties
+                    try
+                    {
+                        var keysProperty = type.GetProperty("Keys");
+                        var indexer = type.GetProperty("Item");
+
+                        if (keysProperty != null && indexer != null)
+                        {
+                            var keys = keysProperty.GetValue(value) as System.Collections.IEnumerable;
+                            if (keys != null)
+                            {
+                                foreach (var key in keys)
+                                {
+                                    var keyStr = key?.ToString() ?? "null";
+                                    var val = indexer.GetValue(value, new[] { key });
+                                    dict[keyStr] = val != null ? ExtractValueFromDuckDbType(val) : "null";
+                                }
+                                return dict;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to extract dictionary via reflection: {ex.Message}");
+                    }
+                }
+
+                // Handle List<T> or other generic collections
+                if (genericTypeDef == typeof(List<>) ||
+                    type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(System.Collections.Generic.IList<>)))
+                {
+                    var list = new List<object>();
+                    if (value is System.Collections.IEnumerable enumerable)
+                    {
+                        foreach (var item in enumerable)
+                        {
+                            list.Add(item != null ? ExtractValueFromDuckDbType(item) : "null");
+                        }
+                    }
+                    return list;
+                }
+            }
+
+            // Handle non-generic dictionaries
+            if (value is System.Collections.IDictionary dictionary)
+            {
+                var dict = new Dictionary<string, object>();
+                foreach (System.Collections.DictionaryEntry entry in dictionary)
+                {
+                    var key = entry.Key?.ToString() ?? "null";
+                    var val = entry.Value != null ? ExtractValueFromDuckDbType(entry.Value) : "null";
+                    dict[key] = val;
+                }
+                return dict;
+            }
+
+            // Handle arrays and general enumerables (but not strings)
+            if (value is System.Collections.IEnumerable enumerable2 && !(value is string))
+            {
+                var list = new List<object>();
+                foreach (var item in enumerable2)
+                {
+                    list.Add(item != null ? ExtractValueFromDuckDbType(item) : "null");
+                }
+                return list;
+            }
+
+            // Handle structs (complex objects with properties)
+            if (!type.IsPrimitive && type != typeof(string) && type != typeof(DateTime) &&
+                type != typeof(decimal) && !type.IsEnum && type.IsClass)
+            {
+                // Try to extract properties using reflection
+                try
+                {
+                    var properties = type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                    if (properties.Length > 0)
+                    {
+                        var dict = new Dictionary<string, object>();
+                        foreach (var prop in properties)
+                        {
+                            try
+                            {
+                                // Skip indexer properties
+                                if (prop.GetIndexParameters().Length > 0)
+                                    continue;
+
+                                var propValue = prop.GetValue(value);
+                                dict[prop.Name] = propValue != null ? ExtractValueFromDuckDbType(propValue) : "null";
+                            }
+                            catch
+                            {
+                                // Skip properties that can't be read
+                            }
+                        }
+                        if (dict.Count > 0)
+                        {
+                            return dict;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fall through to return original value
+                }
+            }
+
+            // Return primitive types as-is
+            return value;
         }
 
         private bool TryParseGeometry(byte[] wkb, out NetTopologySuite.Geometries.Geometry? geometry)
@@ -1269,6 +1409,57 @@ namespace S3Browser
                         System.Diagnostics.Debug.WriteLine($"Error copying cell content: {ex.Message}");
                     }
                 }
+            }
+        }
+
+        private void FilePathBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(_displayPath))
+                {
+                    // Retry clipboard operation if it fails (common issue when clipboard is busy)
+                    bool clipboardSet = false;
+                    for (int i = 0; i < 3; i++)
+                    {
+                        try
+                        {
+                            Clipboard.SetDataObject(_displayPath, true);
+                            clipboardSet = true;
+                            break;
+                        }
+                        catch (System.Runtime.InteropServices.COMException)
+                        {
+                            if (i < 2)
+                            {
+                                System.Threading.Thread.Sleep(100);
+                            }
+                            else
+                            {
+                                throw;
+                            }
+                        }
+                    }
+
+                    if (clipboardSet)
+                    {
+                        StatusTextBlock.Text = $"Copied to clipboard: {_displayPath}";
+
+                        // Flash the background to indicate copy
+                        var border = sender as Border;
+                        if (border != null)
+                        {
+                            var originalBrush = border.Background;
+                            border.Background = new SolidColorBrush(Color.FromRgb(200, 230, 201)); // Light green
+                            Task.Delay(200).ContinueWith(_ => Dispatcher.Invoke(() => border.Background = originalBrush));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to copy path: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
