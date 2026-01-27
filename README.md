@@ -21,10 +21,18 @@ Think of it as a specialized file explorer for AWS S3 - browse buckets and folde
 2. Download the appropriate ZIP file for your architecture:
    - **S3Browser-vX.X.X-win-x64.zip** for 64-bit Intel/AMD systems (most common)
    - **S3Browser-vX.X.X-win-arm64.zip** for ARM64 systems
-3. Extract the ZIP file to a folder of your choice
+3. Extract the **entire contents** of the ZIP file to a folder of your choice
 4. Run **S3Browser.exe**
 
-**No .NET installation required** - the application is fully self-contained!
+**Important**: 
+- **Extract ALL files** from the ZIP, not just the .exe
+- The .exe needs the accompanying DLL files (like duckdb.dll) to run
+- Keep all extracted files in the same folder
+- No .NET installation required - the application is fully self-contained!
+
+**Why multiple files?**: Native libraries (DuckDB, SkiaSharp) are kept separate for **fast startup** (2-5 seconds instead of 30-60 seconds). See [DEPLOYMENT-OPTIONS.md](DEPLOYMENT-OPTIONS.md) for details.
+
+**Note**: When running for the first time, Windows SmartScreen may show a warning. See the [Troubleshooting](#️-troubleshooting) section for details.
 
 ### Build from Source
 
@@ -145,6 +153,16 @@ Beyond Parquet, S3 Browser handles many common file formats:
    - Enter your AWS profile name, OR
    - Check "Anonymous" for public buckets
 3. **Start browsing!**
+
+### ⏱️ Startup Time
+
+**First launch**: Takes **10-15 seconds** while the application initializes all components.
+
+**Why?**: The application uses compression to keep file size smaller (~100-150 MB). Windows must decompress components before launch. This is normal for compressed .NET applications.
+
+**Important**: .NET does not provide a way to show a progress bar during decompression. This happens at the runtime level before any application code runs. Your cursor will show as "busy" - just wait and the application will appear.
+
+**Alternative**: The application can be configured for 2-5 second startup at the cost of a larger file size (~200-250 MB) by disabling compression in the build configuration.
 
 ## 💡 How to Use
 
@@ -298,6 +316,69 @@ ORDER BY count DESC
 - **Internet Required**: Map tiles need internet connection to display
 
 ## 🛠️ Troubleshooting
+
+### Application takes 10-15 seconds to start
+**This is expected behavior** with the current configuration.
+
+The application uses compression to reduce file size (~100-150 MB). The 10-15 seconds is Windows decompressing internal components at the .NET Runtime level. No progress bar is possible during this phase.
+
+**This is normal and safe** - just wait and the application will appear.
+
+### Windows SmartScreen / "Windows protected your PC"
+**This is normal for unsigned applications.**
+
+When running for the first time, Windows SmartScreen may show a warning:
+
+**"Windows protected your PC" message:**
+1. Click **"More info"** on the warning dialog
+2. Click **"Run anyway"** button
+
+**Why this happens:**
+- Code signing certificates cost $100-300/year
+- This is a free, open-source application
+- The code is publicly available for review on GitHub
+- Once enough people download it, Windows will stop showing the warning
+
+**Is it safe?**
+- ✅ Yes! The application is open source - you can review all code
+- ✅ No telemetry, no data collection, no network calls except to AWS S3
+- ✅ Read-only access to S3 - never modifies or deletes your data
+
+### Application doesn't start / crashes immediately
+**Solutions:**
+
+1. **Check for error messages**: The app now shows detailed error dialogs. Read the error message carefully.
+
+2. **Run from command line to see errors**:
+   ```cmd
+   # Navigate to the folder containing S3Browser.exe
+   cd C:\path\to\S3Browser
+   
+   # Run from command line
+   S3Browser.exe
+   ```
+   Any errors will be displayed in the console.
+
+3. **Check Windows Event Viewer**:
+   - Press Win+X, select "Event Viewer"
+   - Navigate to: Windows Logs → Application
+   - Look for recent errors from S3Browser
+
+4. **Missing Visual C++ Redistributables**:
+   - Download and install: [VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+
+5. **Antivirus blocking**: Temporarily disable antivirus or add S3Browser.exe to exclusions
+
+6. **Extract to a simple path**: Avoid paths with special characters or very long paths
+   - ✅ Good: `C:\Apps\S3Browser\`
+   - ❌ Bad: `C:\Users\YourName\Documents\My Downloads (Old)\S3 Browser v1.0\`
+
+7. **Build from source**: If the published version doesn't work, try building from source:
+   ```bash
+   git clone https://github.com/sasastanojkov/S3Browser.git
+   cd S3Browser
+   dotnet run --project S3Browser/S3Browser.csproj
+   ```
 
 ### "Could not load AWS credentials"
 **Solution:**

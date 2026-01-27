@@ -17,7 +17,7 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <PublishTrimmed>false</PublishTrimmed>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
@@ -44,6 +44,7 @@
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
   </ItemGroup>
 
