@@ -1,0 +1,177 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - runtime: win-x64
+            arch: x64
+          - runtime: win-arm64
+            arch: ARM64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Extract version from tag
+      id: get_version
+      shell: pwsh
+      run: |
+        $tag = "${{ github.ref_name }}"
+        $version = $tag -replace '^v', ''
+        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+        echo "TAG=$tag" >> $env:GITHUB_OUTPUT
+
+    - name: Restore dependencies
+      run: dotnet restore S3Browser/S3Browser.csproj
+
+    - name: Build and Publish
+      run: |
+        dotnet publish S3Browser/S3Browser.csproj `
+          -c Release `
+          -r ${{ matrix.runtime }} `
+          --self-contained true `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:EnableCompressionInSingleFile=true `
+          -p:PublishTrimmed=false `
+          -p:Version=${{ steps.get_version.outputs.VERSION }} `
+          -p:AssemblyVersion=${{ steps.get_version.outputs.VERSION }} `
+          -p:FileVersion=${{ steps.get_version.outputs.VERSION }} `
+          -o publish/${{ matrix.runtime }}
+
+    - name: Create README for release
+      shell: pwsh
+      run: |
+        $readmeContent = @"
+        # S3Browser ${{ steps.get_version.outputs.TAG }}
+
+        ## Overview
+        S3Browser is a Windows desktop application for browsing and querying AWS S3 buckets.
+
+        ## Features
+        - Browse S3 buckets, folders, and files
+        - View Parquet files with DuckDB SQL engine
+        - View CSV/TSV files
+        - View text files
+        - Visualize geospatial data from WKB/WKT geometry columns
+        - Write custom SQL queries against Parquet files
+        - Download files and folders
+        - Support for both authenticated and anonymous (public bucket) access
+
+        ## System Requirements
+        - Windows 10 or later (x64 or ARM64)
+        - No .NET installation required (self-contained)
+
+        ## Installation
+        1. Download the appropriate ZIP file for your architecture:
+           - **S3Browser-${{ steps.get_version.outputs.TAG }}-win-x64.zip** for 64-bit Intel/AMD systems
+           - **S3Browser-${{ steps.get_version.outputs.TAG }}-win-arm64.zip** for ARM64 systems
+        2. Extract the ZIP file to a folder of your choice
+        3. Run **S3Browser.exe**
+
+        ## AWS Configuration
+        For authenticated access to your AWS S3 buckets:
+        1. Install AWS CLI: https://aws.amazon.com/cli/
+        2. Configure your AWS profile: ``aws configure sso`` or ``aws configure``
+        3. For SSO profiles, login before using: ``aws sso login --profile your-profile``
+
+        For public/anonymous bucket access, no AWS configuration is needed.
+
+        ## Usage
+        - **Browse buckets**: Select your AWS profile or use anonymous mode
+        - **Navigate**: Double-click folders/files or press Enter
+        - **Copy S3 paths**: Select an item and press Ctrl+C
+        - **View Parquet files**: Double-click .parquet files or use wildcard patterns
+        - **Custom queries**: Use the "Write Custom Query" button for SQL queries
+
+        ## Architecture
+        This build is for **${{ matrix.arch }}** architecture.
+
+        ## License
+        See LICENSE file in the repository.
+
+        ## Source Code
+        https://github.com/${{ github.repository }}
+        "@
+
+        $readmeContent | Out-File -FilePath "publish/${{ matrix.runtime }}/README.txt" -Encoding UTF8
+
+    - name: Create ZIP archive
+      shell: pwsh
+      run: |
+        $zipName = "S3Browser-${{ steps.get_version.outputs.TAG }}-${{ matrix.runtime }}.zip"
+        Compress-Archive -Path "publish/${{ matrix.runtime }}/*" -DestinationPath $zipName
+        echo "ZIP_NAME=$zipName" >> $env:GITHUB_OUTPUT
+      id: create_zip
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: S3Browser-${{ matrix.runtime }}
+        path: S3Browser-${{ steps.get_version.outputs.TAG }}-${{ matrix.runtime }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        TAG="${{ github.ref_name }}"
+        VERSION="${TAG#v}"
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: S3Browser ${{ steps.get_version.outputs.TAG }}
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        files: |
+          artifacts/S3Browser-win-x64/S3Browser-${{ steps.get_version.outputs.TAG }}-win-x64.zip
+          artifacts/S3Browser-win-arm64/S3Browser-${{ steps.get_version.outputs.TAG }}-win-arm64.zip
+        body: |
+          ## S3Browser ${{ steps.get_version.outputs.TAG }}
+
+          Desktop application for browsing and querying AWS S3 buckets with Parquet file support.
+
+          ### Downloads
+          - **Windows x64**: S3Browser-${{ steps.get_version.outputs.TAG }}-win-x64.zip
+          - **Windows ARM64**: S3Browser-${{ steps.get_version.outputs.TAG }}-win-arm64.zip
+
+          ### Installation
+          1. Download the appropriate ZIP file for your architecture
+          2. Extract to a folder of your choice
+          3. Run S3Browser.exe
+          4. See README.txt inside the ZIP for detailed instructions
+
+          ### What's Changed
+          See the changelog below for details.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

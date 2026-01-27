@@ -13,6 +13,41 @@ S3 Browser is a **read-only desktop tool** that makes working with Amazon S3 sto
 
 Think of it as a specialized file explorer for AWS S3 - browse buckets and folders, preview files, query data, and visualize geographic information, all from one intuitive application.
 
+## 📥 Installation
+
+### Download Pre-built Release (Recommended)
+
+1. Go to the [Releases](https://github.com/sasastanojkov/S3Browser/releases) page
+2. Download the appropriate ZIP file for your architecture:
+   - **S3Browser-vX.X.X-win-x64.zip** for 64-bit Intel/AMD systems (most common)
+   - **S3Browser-vX.X.X-win-arm64.zip** for ARM64 systems
+3. Extract the ZIP file to a folder of your choice
+4. Run **S3Browser.exe**
+
+**No .NET installation required** - the application is fully self-contained!
+
+### Build from Source
+
+#### Prerequisites
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- Visual Studio 2022 (optional, for development)
+
+#### Build Steps
+
+```bash
+# Clone the repository
+git clone https://github.com/sasastanojkov/S3Browser.git
+cd S3Browser
+
+# Restore dependencies
+dotnet restore
+
+# Build for your architecture (win-x64 or win-arm64)
+dotnet publish S3Browser/S3Browser.csproj -c Release -r win-x64 --self-contained true
+
+# Output will be in: S3Browser/bin/Release/net8.0-windows/win-x64/publish/
+```
+
 ## ✨ Key Capabilities
 
 ### 📂 Browse S3 Like a File Explorer
@@ -78,9 +113,10 @@ Beyond Parquet, S3 Browser handles many common file formats:
 ## 🎮 Getting Started
 
 ### What You Need
-- **Windows 10 or 11** (64-bit)
-- **.NET 8.0 Runtime** - [Download from Microsoft](https://dotnet.microsoft.com/download/dotnet/8.0)
+- **Windows 10 or 11** (x64 or ARM64)
 - **AWS credentials** (for private buckets) OR just an **internet connection** (for public buckets)
+
+**Note**: If using the pre-built release, no .NET installation is required. If building from source, you need .NET 8 SDK.
 
 ### First Time Setup
 
@@ -307,6 +343,24 @@ Want to help make S3 Browser better? Contributions are welcome!
 4. Commit with clear messages: `git commit -m 'Add awesome feature'`
 5. Push to your fork: `git push origin feature/my-feature`
 6. Open a Pull Request
+
+## 🚀 Creating Releases
+
+For maintainers: To create a new release:
+
+1. **Update version** and commit your changes
+2. **Create and push a version tag**:
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+3. **GitHub Actions automatically**:
+   - Builds the application for win-x64 and win-arm64
+   - Creates single-file executables
+   - Packages them as ZIP files with README
+   - Creates a GitHub Release with downloadable assets
+
+The workflow creates releases for both x64 and ARM64 architectures automatically.
 
 ## 📜 License
 
