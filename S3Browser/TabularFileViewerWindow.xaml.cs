@@ -5,6 +5,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using Amazon.Runtime;
+using Amazon.Runtime.CredentialManagement;
+using DuckDB.NET.Data;
 using S3Browser.Services;
 
 namespace S3Browser
@@ -73,8 +76,8 @@ namespace S3Browser
 
     /// <summary>
     /// Window for viewing tabular files (CSV and TSV) from S3.
-    /// Downloads files temporarily and parses them with custom delimiter handling.
-    /// Uses S3Manager for all S3 operations.
+    /// Uses DuckDB engine to process files directly from S3 without downloading.
+    /// Supports CSV and TSV file formats with automatic delimiter detection.
     /// </summary>
     public partial class TabularFileViewerWindow : Window
     {
@@ -82,7 +85,7 @@ namespace S3Browser
         private readonly string _key;
         private readonly string _fileName;
         private readonly string _fileType; // "csv" or "tsv"
-        private string? _localFilePath;
+        private DuckDBConnection? _duckDbConnection;
         private CancellationTokenSource? _cancellationTokenSource;
 
         /// <summary>
@@ -104,7 +107,78 @@ namespace S3Browser
             FileNameTextBlock.Text = $"{fileType.ToUpperInvariant()} File: {fileName}";
             Title = $"{fileType.ToUpperInvariant()} Viewer - {fileName}";
 
-            LoadTabularDataAsync();
+            InitializeDuckDbConnectionAsync();
+        }
+
+        private async void InitializeDuckDbConnectionAsync()
+        {
+            try
+            {
+                StatusTextBlock.Text = "Initializing connection...";
+                LoadingOverlay.Visibility = Visibility.Visible;
+
+                // Get S3Client from S3Manager
+                var s3Client = await S3Manager.Instance.GetS3ClientForBucketAsync(_bucketName);
+                if (s3Client == null)
+                {
+                    throw new InvalidOperationException($"Unable to access bucket '{_bucketName}'.");
+                }
+
+                var region = s3Client.Config.RegionEndpoint?.SystemName ?? "us-east-1";
+
+                // Check if this is a public bucket using S3Manager
+                bool isPublicBucket = S3Manager.Instance.IsPublicBucket(_bucketName);
+
+                if (isPublicBucket)
+                {
+                    // Create connection for anonymous/public S3 access (no credentials)
+                    _duckDbConnection = await Task.Run(() =>
+                        DuckDbManager.Instance.CreateConnectionWithAnonymousS3Access(region));
+                }
+                else
+                {
+                    // Get AWS credentials using S3Manager's profile
+                    var chain = new Amazon.Runtime.CredentialManagement.CredentialProfileStoreChain();
+                    Amazon.Runtime.AWSCredentials? awsCredentials = null;
+
+                    var awsProfile = S3Manager.Instance.GetAwsProfile();
+                    if (!string.IsNullOrEmpty(awsProfile))
+                    {
+                        if (!chain.TryGetAWSCredentials(awsProfile, out awsCredentials))
+                        {
+                            throw new InvalidOperationException($"Unable to retrieve AWS credentials for profile '{awsProfile}'.");
+                        }
+                    }
+                    else
+                    {
+                        // Fallback: try to get credentials from default profile
+                        if (!chain.TryGetAWSCredentials(null, out awsCredentials))
+                        {
+                            throw new InvalidOperationException("Unable to retrieve AWS credentials from default sources.");
+                        }
+                    }
+
+                    if (awsCredentials == null)
+                    {
+                        throw new InvalidOperationException("Unable to retrieve AWS credentials.");
+                    }
+
+                    var immutableCredentials = await awsCredentials.GetCredentialsAsync();
+
+                    // Create connection with S3 credentials for authenticated access
+                    _duckDbConnection = await Task.Run(() =>
+                        DuckDbManager.Instance.CreateConnectionWithS3Access(immutableCredentials, region));
+                }
+
+                LoadTabularDataAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error initializing DuckDB connection: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                StatusTextBlock.Text = "Error initializing connection";
+                LoadingOverlay.Visibility = Visibility.Collapsed;
+            }
         }
 
         private async void LoadTabularDataAsync()
@@ -119,33 +193,36 @@ namespace S3Browser
             RowLimitComboBox.IsEnabled = false;
             ResultsDataGrid.ItemsSource = null;
             LoadingOverlay.Visibility = Visibility.Visible;
-            LoadingMessageTextBlock.Text = "Downloading file...";
-            StatusTextBlock.Text = "Downloading...";
+            LoadingMessageTextBlock.Text = "Reading file...";
+            StatusTextBlock.Text = "Querying file...";
 
             try
             {
+                if (_duckDbConnection == null)
+                {
+                    throw new InvalidOperationException("DuckDB connection is not initialized.");
+                }
+
                 var selectedItem = RowLimitComboBox.SelectedItem as ComboBoxItem;
                 if (selectedItem == null) return;
 
                 int rowLimit = Convert.ToInt32(selectedItem.Tag);
                 bool hasHeader = HasHeaderCheckBox.IsChecked ?? false;
 
-                // Download the file to a temporary location if not already downloaded
-                if (_localFilePath == null || !File.Exists(_localFilePath))
-                {
-                    _localFilePath = Path.Combine(Path.GetTempPath(), $"s3browser_{Guid.NewGuid()}_{_fileName}");
+                // Build S3 path
+                string s3Path = $"s3://{_bucketName}/{_key}";
 
-                    using (var response = await S3Manager.Instance.GetObjectAsync(_bucketName, _key))
-                    {
-                        await response.WriteResponseStreamToFileAsync(_localFilePath, false, cancellationToken);
-                    }
-                }
+                LoadingMessageTextBlock.Text = "Executing query...";
+                StatusTextBlock.Text = "Reading data...";
 
-                LoadingMessageTextBlock.Text = "Parsing file...";
-                StatusTextBlock.Text = "Parsing file...";
+                // Build DuckDB query for CSV/TSV
+                string query = BuildDuckDbQuery(s3Path, _fileType, hasHeader, rowLimit);
 
-                // Parse the CSV/TSV file on background thread
-                var dataTable = await Task.Run(() => ParseDelimitedFile(_localFilePath, _fileType, hasHeader, rowLimit, cancellationToken), cancellationToken);
+                // Execute query on background thread
+                var dataTable = await Task.Run(() => ExecuteQuery(query, cancellationToken), cancellationToken);
+
+                // Create custom columns with expandable cells
+                CreateCustomColumns(dataTable);
 
                 ResultsDataGrid.ItemsSource = dataTable.DefaultView;
 
@@ -178,66 +255,91 @@ namespace S3Browser
             }
         }
 
-        private DataTable ParseDelimitedFile(string filePath, string fileType, bool hasHeader, int rowLimit, CancellationToken cancellationToken)
+        private string BuildDuckDbQuery(string s3Path, string fileType, bool hasHeader, int rowLimit)
         {
-            var dataTable = new DataTable();
-            char delimiter = fileType == "tsv" ? '\t' : ',';
+            string delimiter = fileType == "tsv" ? "E'\\t'" : "','";  // Tab for TSV, comma for CSV
+            string headerParam = hasHeader ? "true" : "false";
 
-            using (var reader = new StreamReader(filePath))
+            string query = $"SELECT * FROM read_csv('{s3Path}', delim={delimiter}, header={headerParam}, auto_detect=true)";
+
+            if (rowLimit != -1)
             {
-                bool isFirstRow = true;
-                int columnCount = 0;
-                int rowsRead = 0;
+                query += $" LIMIT {rowLimit}";
+            }
 
-                while (!reader.EndOfStream && (rowLimit == -1 || rowsRead < rowLimit))
+            return query;
+        }
+
+        private DataTable ExecuteQuery(string query, CancellationToken cancellationToken)
+        {
+            if (_duckDbConnection == null)
+                throw new InvalidOperationException("DuckDB connection is not available.");
+
+            var dataTable = new DataTable();
+
+            using (var command = _duckDbConnection.CreateCommand())
+            {
+                command.CommandText = query;
+
+                using (var reader = command.ExecuteReader())
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    string? line = reader.ReadLine();
-                    if (string.IsNullOrEmpty(line)) continue;
-
-                    var values = ParseDelimitedLine(line, delimiter);
-
-                    if (isFirstRow)
+                    // Create columns from reader schema
+                    for (int i = 0; i < reader.FieldCount; i++)
                     {
-                        columnCount = values.Length;
-
-                        if (hasHeader)
-                        {
-                            // Use first row as column headers
-                            for (int i = 0; i < values.Length; i++)
-                            {
-                                dataTable.Columns.Add(values[i]);
-                            }
-                            isFirstRow = false;
-                            continue;
-                        }
-                        else
-                        {
-                            // Create default column headers
-                            for (int i = 0; i < values.Length; i++)
-                            {
-                                dataTable.Columns.Add($"Column{i + 1}");
-                            }
-                        }
-                        isFirstRow = false;
+                        string columnName = reader.GetName(i);
+                        dataTable.Columns.Add(columnName, typeof(string)); // Use string for all columns to handle mixed types
                     }
 
-                    // Add row data
-                    var row = dataTable.NewRow();
-                    for (int i = 0; i < Math.Min(values.Length, columnCount); i++)
+                    // Read data rows
+                    while (reader.Read())
                     {
-                        row[i] = values[i];
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        var row = dataTable.NewRow();
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            row[i] = reader.IsDBNull(i) ? string.Empty : reader.GetValue(i)?.ToString() ?? string.Empty;
+                        }
+                        dataTable.Rows.Add(row);
                     }
-                    dataTable.Rows.Add(row);
-                    rowsRead++;
                 }
             }
 
-            // Create custom columns with expandable cells
-            CreateCustomColumns(dataTable);
-
             return dataTable;
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            Close();
+        }
+
+        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+        {
+            // Cancel any running operations
+            _cancellationTokenSource?.Cancel();
+
+            // Clean up DuckDB connection safely
+            if (_duckDbConnection != null)
+            {
+                try
+                {
+                    if (_duckDbConnection.State == System.Data.ConnectionState.Open)
+                    {
+                        _duckDbConnection.Close();
+                    }
+                    _duckDbConnection.Dispose();
+                }
+                catch
+                {
+                    // Ignore disposal errors
+                }
+                finally
+                {
+                    _duckDbConnection = null;
+                }
+            }
+
+            base.OnClosing(e);
         }
 
         private void CreateCustomColumns(DataTable dataTable)
@@ -352,52 +454,9 @@ namespace S3Browser
             }
         }
 
-        private string[] ParseDelimitedLine(string line, char delimiter)
-        {
-            var values = new List<string>();
-            bool inQuotes = false;
-            var currentValue = new System.Text.StringBuilder();
-
-            for (int i = 0; i < line.Length; i++)
-            {
-                char c = line[i];
-
-                if (c == '"')
-                {
-                    if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
-                    {
-                        // Escaped quote
-                        currentValue.Append('"');
-                        i++;
-                    }
-                    else
-                    {
-                        inQuotes = !inQuotes;
-                    }
-                }
-                else if (c == delimiter && !inQuotes)
-                {
-                    values.Add(currentValue.ToString());
-                    currentValue.Clear();
-                }
-                else
-                {
-                    currentValue.Append(c);
-                }
-            }
-
-            values.Add(currentValue.ToString());
-            return values.ToArray();
-        }
-
         private void ReloadButton_Click(object sender, RoutedEventArgs e)
         {
             LoadTabularDataAsync();
-        }
-
-        private void CloseButton_Click(object sender, RoutedEventArgs e)
-        {
-            Close();
         }
 
         protected override void OnClosed(EventArgs e)
@@ -408,18 +467,8 @@ namespace S3Browser
             _cancellationTokenSource?.Cancel();
             _cancellationTokenSource?.Dispose();
 
-            // Clean up temporary file
-            if (_localFilePath != null && File.Exists(_localFilePath))
-            {
-                try
-                {
-                    File.Delete(_localFilePath);
-                }
-                catch
-                {
-                    // Ignore cleanup errors
-                }
-            }
+            // Connection should already be cleaned up in OnClosing
+            // Just ensure cancellation token is disposed
         }
     }
 }
