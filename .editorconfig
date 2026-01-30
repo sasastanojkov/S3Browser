@@ -338,3 +338,7 @@ dotnet_diagnostic.SA1642.severity = none
 
 # SA1629: Documentation text should end with a period
 dotnet_diagnostic.SA1629.severity = none
+
+# SA1401: Fields should be private
+# Suppressed for protected fields in base classes that are accessed by derived classes
+dotnet_diagnostic.SA1401.severity = none

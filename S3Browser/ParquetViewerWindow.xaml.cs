@@ -267,7 +267,7 @@ namespace S3Browser
             }
         }
 
-        private DataTable? ExecuteQuery(string query, CancellationToken cancellationToken)
+        private new DataTable? ExecuteQuery(string query, CancellationToken cancellationToken)
         {
             // Use base class implementation
             return base.ExecuteQuery(query, cancellationToken);
