@@ -1,26 +1,28 @@
 using System.Windows;
 using System.Windows.Input;
+using S3Browser.Interfaces;
 
 namespace S3Browser
 {
     /// <summary>
-    /// Dialog window for editing and executing custom SQL queries against Parquet files in S3.
+    /// Dialog window for editing and executing custom SQL queries against data files in S3.
     /// Provides syntax highlighting, error messages, and direct integration with DuckDB.
+    /// Works with any viewer window that implements IQueryExecutor.
     /// </summary>
     public partial class QueryEditorDialog : Window
     {
         private readonly string _bucketName;
         private readonly string _folderName;
-        private readonly ParquetViewerWindow? _existingViewerWindow;
+        private readonly IQueryExecutor? _existingViewerWindow;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="QueryEditorDialog"/> class.
         /// </summary>
-        /// <param name="bucketName">Name of the S3 bucket containing the Parquet files.</param>
+        /// <param name="bucketName">Name of the S3 bucket containing the files.</param>
         /// <param name="initialQuery">Initial SQL query to populate the editor.</param>
         /// <param name="folderName">Display name for the folder being queried.</param>
-        /// <param name="existingViewerWindow">Optional existing ParquetViewerWindow to re-use instead of creating a new one.</param>
-        public QueryEditorDialog(string bucketName, string initialQuery, string folderName, ParquetViewerWindow? existingViewerWindow = null)
+        /// <param name="existingViewerWindow">Optional existing viewer window implementing IQueryExecutor to re-use instead of creating a new one.</param>
+        public QueryEditorDialog(string bucketName, string initialQuery, string folderName, IQueryExecutor? existingViewerWindow = null)
         {
             InitializeComponent();
 
@@ -74,9 +76,10 @@ namespace S3Browser
 
                 // Validate query (basic check)
                 if (!query.Contains("read_parquet", StringComparison.OrdinalIgnoreCase) &&
+                    !query.Contains("read_csv", StringComparison.OrdinalIgnoreCase) &&
                     !query.Contains("FROM", StringComparison.OrdinalIgnoreCase))
                 {
-                    ShowMessage("Query should contain 'read_parquet' function or 'FROM' clause.", isError: true);
+                    ShowMessage("Query should contain 'read_parquet', 'read_csv' function or 'FROM' clause.", isError: true);
                     return;
                 }
 
@@ -88,15 +91,31 @@ namespace S3Browser
                 }
                 else
                 {
-                    // Open ParquetViewerWindow with custom query (new window)
-                    var viewer = new ParquetViewerWindow(
-                        _bucketName,
-                        query, // Pass the custom query as the key parameter
-                        _folderName,
-                        isWildcard: false, // Mark as not wildcard since we're using custom query
-                        customQuery: query); // Pass custom query
-
-                    viewer.Show();
+                    // Determine file type from query and open appropriate viewer
+                    if (query.Contains("read_parquet", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var viewer = new ParquetViewerWindow(
+                            _bucketName,
+                            query,
+                            _folderName,
+                            isWildcard: false,
+                            customQuery: query);
+                        viewer.Show();
+                    }
+                    else if (query.Contains("read_csv", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var viewer = new TabularFileViewerWindow(
+                            _bucketName,
+                            query,
+                            _folderName,
+                            customQuery: query);
+                        viewer.Show();
+                    }
+                    else
+                    {
+                        ShowMessage("Unable to determine file type. Query should contain 'read_parquet' or 'read_csv'.", isError: true);
+                        return;
+                    }
                 }
 
                 // Close this dialog

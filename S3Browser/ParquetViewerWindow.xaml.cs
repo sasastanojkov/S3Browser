@@ -1,105 +1,32 @@
 using System.Data;
-using System.Globalization;
 using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
-using System.Windows.Media;
-using DuckDB.NET.Data;
-using Microsoft.Win32;
-using NetTopologySuite.Geometries;
-using NetTopologySuite.IO;
-using S3Browser.Services;
+using S3Browser.Converters;
+using S3Browser.Helpers;
 
 namespace S3Browser
 {
     /// <summary>
-    /// Converter for truncating text in Parquet viewer cells.
-    /// </summary>
-    public class SmartTruncateTextConverter : IValueConverter
-    {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            if (value == null || value == DBNull.Value)
-                return "";
-
-            string text = value.ToString() ?? "";
-
-            // If text has multiple lines, show only first line
-            if (text.Contains('\n'))
-            {
-                var firstLine = text.Split('\n')[0];
-
-                // If first line is longer than 50 text elements (proper Unicode handling), truncate it
-                var stringInfo = new StringInfo(firstLine);
-                if (stringInfo.LengthInTextElements > 50)
-                    return stringInfo.SubstringByTextElements(0, 50);
-                return firstLine;
-            }
-
-            // If text is longer than 50 text elements (proper Unicode handling), truncate
-            var textStringInfo = new StringInfo(text);
-            if (textStringInfo.LengthInTextElements > 50)
-                return textStringInfo.SubstringByTextElements(0, 50);
-
-            // Otherwise show full text
-            return text;
-        }
-
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            throw new NotImplementedException();
-        }
-    }
-
-    /// <summary>
-    /// Converter that determines if text needs expansion in Parquet viewer.
-    /// </summary>
-    public class NeedsExpansionConverter : IValueConverter
-    {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            if (value == null || value == DBNull.Value)
-                return Visibility.Collapsed;
-
-            string text = value.ToString() ?? "";
-
-            // Show button if text is longer than 50 chars OR has multiple lines
-            if (text.Length > 50 || text.Contains('\n'))
-                return Visibility.Visible;
-
-            return Visibility.Collapsed;
-        }
-
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            throw new NotImplementedException();
-        }
-    }
-
-    /// <summary>
     /// Window for viewing Parquet files from S3 using DuckDB engine.
     /// Supports single file and wildcard (folder) modes with geometry visualization.
     /// </summary>
-    public partial class ParquetViewerWindow : Window
+    public partial class ParquetViewerWindow : DataViewerWindowBase
     {
         private readonly string _bucketName;
         private readonly string _key;
         private readonly string _fileName;
         private readonly bool _isWildcard;
-        private string? _customQuery;
-        private string? _lastExecutedQuery;
         private readonly bool _loadAsTable;
         private readonly string _tableName = "parquet_data";
-        private DuckDBConnection? _duckDbConnection;
-        private CancellationTokenSource? _cancellationTokenSource;
-        private Dictionary<int, List<GeometryMapWindow.GeometryInfo>> _rowGeometries = new(); // Map row index to geometries with column info
-        private GeometryMapWindow? _currentMapWindow;
-        private int _lastSelectedRowIndex = -1; // Track the last selected row for toggle behavior
-        private string _displayPath = string.Empty; // The S3 path to display and copy
+
+        // Override abstract properties to provide access to XAML controls
+        protected override DataGrid DataGrid => ResultsDataGrid;
+        protected override TextBlock StatusText => StatusTextBlock;
+        protected override string FileName => _fileName;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ParquetViewerWindow"/> class.
@@ -122,10 +49,10 @@ namespace S3Browser
             _loadAsTable = loadAsTable;
 
             // Subscribe to row selection changes
-            ResultsDataGrid.SelectionChanged += ResultsDataGrid_SelectionChanged;
+            ResultsDataGrid.SelectionChanged += HandleResultsDataGridSelectionChanged;
 
             // Subscribe to keyboard events for copy functionality
-            ResultsDataGrid.PreviewKeyDown += ResultsDataGrid_PreviewKeyDown;
+            ResultsDataGrid.PreviewKeyDown += HandleResultsDataGridPreviewKeyDown;
 
             // Build the S3 path that will be used
             if (_isWildcard)
@@ -154,58 +81,8 @@ namespace S3Browser
                 StatusTextBlock.Text = "Initializing database connection...";
                 LoadingMessageTextBlock.Text = "Configuring S3 access...";
 
-                // Get S3Client from S3Manager
-                var s3Client = await S3Manager.Instance.GetS3ClientForBucketAsync(_bucketName);
-                if (s3Client == null)
-                {
-                    throw new InvalidOperationException($"Unable to access bucket '{_bucketName}'.");
-                }
-
-                var region = s3Client.Config.RegionEndpoint?.SystemName ?? "us-east-1";
-
-                // Check if this is a public bucket using S3Manager
-                bool isPublicBucket = S3Manager.Instance.IsPublicBucket(_bucketName);
-
-                if (isPublicBucket)
-                {
-                    // Create connection for anonymous/public S3 access (no credentials)
-                    _duckDbConnection = await Task.Run(() =>
-                        DuckDbManager.Instance.CreateConnectionWithAnonymousS3Access(region));
-                }
-                else
-                {
-                    // Get AWS credentials using S3Manager's profile
-                    var chain = new Amazon.Runtime.CredentialManagement.CredentialProfileStoreChain();
-                    Amazon.Runtime.AWSCredentials? awsCredentials = null;
-
-                    var awsProfile = S3Manager.Instance.GetAwsProfile();
-                    if (!string.IsNullOrEmpty(awsProfile))
-                    {
-                        if (!chain.TryGetAWSCredentials(awsProfile, out awsCredentials))
-                        {
-                            throw new InvalidOperationException($"Unable to retrieve AWS credentials for profile '{awsProfile}'.");
-                        }
-                    }
-                    else
-                    {
-                        // Fallback: try to get credentials from default profile
-                        if (!chain.TryGetAWSCredentials(null, out awsCredentials))
-                        {
-                            throw new InvalidOperationException("Unable to retrieve AWS credentials from default sources.");
-                        }
-                    }
-
-                    if (awsCredentials == null)
-                    {
-                        throw new InvalidOperationException("Unable to retrieve AWS credentials.");
-                    }
-
-                    var immutableCredentials = await awsCredentials.GetCredentialsAsync();
-
-                    // Create connection with S3 credentials for authenticated access
-                    _duckDbConnection = await Task.Run(() =>
-                        DuckDbManager.Instance.CreateConnectionWithS3Access(immutableCredentials, region));
-                }
+                // Use DuckDbManager to create connection with proper S3 access
+                _duckDbConnection = await DuckDbManager.Instance.CreateConnectionForBucketAsync(_bucketName);
 
                 // Start loading data once connection is ready
                 LoadParquetDataAsync();
@@ -295,7 +172,7 @@ namespace S3Browser
                         LoadingMessageTextBlock.Text = "Creating table from parquet files...";
                         StatusTextBlock.Text = "Loading data into table...";
 
-                        // Create table on background thread
+                        // Create table on background thread using DuckDbManager
                         await Task.Run(() =>
                         {
                             cancellationToken.ThrowIfCancellationRequested();
@@ -305,12 +182,9 @@ namespace S3Browser
                                 throw new InvalidOperationException("DuckDB connection is not initialized.");
                             }
 
-                            using (var command = _duckDbConnection.CreateCommand())
-                            {
-                                // Create table from all parquet files
-                                command.CommandText = $"CREATE TABLE {_tableName} AS SELECT * FROM read_parquet('{s3Path}')";
-                                command.ExecuteNonQuery();
-                            }
+                            // Create table from all parquet files
+                            string createTableCommand = $"CREATE TABLE {_tableName} AS SELECT * FROM read_parquet('{s3Path}')";
+                            DuckDbManager.Instance.ExecuteNonQuery(_duckDbConnection, createTableCommand, cancellationToken);
                         }, cancellationToken);
 
                         LoadingMessageTextBlock.Text = "Querying table...";
@@ -395,96 +269,8 @@ namespace S3Browser
 
         private DataTable? ExecuteQuery(string query, CancellationToken cancellationToken)
         {
-            // This runs on a background thread
-            try
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Query the parquet file(s) using DuckDB with this window's dedicated connection
-                if (_duckDbConnection == null)
-                {
-                    throw new InvalidOperationException("DuckDB connection is not initialized.");
-                }
-
-                using (var command = _duckDbConnection.CreateCommand())
-                {
-                    command.CommandText = query;
-
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    using (var reader = command.ExecuteReader())
-                    {
-                        var dataTable = new DataTable();
-                        var streamColumns = new HashSet<int>();
-
-                        // Check for cancellation periodically while loading data
-                        while (reader.Read())
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-
-                            if (dataTable.Columns.Count == 0)
-                            {
-                                for (int i = 0; i < reader.FieldCount; i++)
-                                {
-                                    var fieldType = reader.GetFieldType(i);
-
-                                    // Track which columns are UnmanagedMemoryStream
-                                    if (typeof(Stream).IsAssignableFrom(fieldType))
-                                    {
-                                        streamColumns.Add(i);
-
-                                        // Store as object to hold byte arrays
-                                        dataTable.Columns.Add(reader.GetName(i), typeof(byte[]));
-                                    }
-                                    else
-                                    {
-                                        dataTable.Columns.Add(reader.GetName(i), fieldType);
-                                    }
-                                }
-                            }
-
-                            var row = dataTable.NewRow();
-                            for (int i = 0; i < reader.FieldCount; i++)
-                            {
-                                if (streamColumns.Contains(i))
-                                {
-                                    // Convert stream to byte array immediately for stream columns
-                                    var value = reader.GetValue(i);
-                                    if (value is UnmanagedMemoryStream stream)
-                                    {
-                                        row[i] = ReadStreamToBytes(stream);
-                                    }
-                                    else if (value == DBNull.Value || value == null)
-                                    {
-                                        row[i] = DBNull.Value;
-                                    }
-                                    else
-                                    {
-                                        // Unexpected type in stream column, convert to string
-                                        row[i] = System.Text.Encoding.UTF8.GetBytes(value.ToString() ?? "");
-                                    }
-                                }
-                                else
-                                {
-                                    row[i] = reader.GetValue(i);
-                                }
-                            }
-                            dataTable.Rows.Add(row);
-                        }
-
-                        return dataTable;
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw; // Re-throw to be handled in the async method
-            }
-            catch (Exception ex)
-            {
-                // Rethrow to be caught in the async method
-                throw new InvalidOperationException($"Query execution failed: {ex.Message}", ex);
-            }
+            // Use base class implementation
+            return base.ExecuteQuery(query, cancellationToken);
         }
 
         private void ReloadButton_Click(object sender, RoutedEventArgs e)
@@ -545,7 +331,7 @@ namespace S3Browser
         /// Called from QueryEditorDialog when user modifies and re-executes a query.
         /// </summary>
         /// <param name="newQuery">The SQL query to execute.</param>
-        public void ExecuteNewQuery(string newQuery)
+        public override void ExecuteNewQuery(string newQuery)
         {
             // Update the custom query field
             _customQuery = newQuery;
@@ -564,95 +350,6 @@ namespace S3Browser
         private void CloseButton_Click(object sender, RoutedEventArgs e)
         {
             Close();
-        }
-
-        private void ResultsDataGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-        {
-            // Get selected row index
-            var selectedIndex = ResultsDataGrid.SelectedIndex;
-
-            // Check if user clicked on the same row again (toggle behavior)
-            if (selectedIndex == _lastSelectedRowIndex && selectedIndex >= 0)
-            {
-                // Deselect the row
-                ResultsDataGrid.SelectedIndex = -1;
-                _lastSelectedRowIndex = -1;
-
-                // Close map window
-                if (_currentMapWindow != null)
-                {
-                    _currentMapWindow.Close();
-                    _currentMapWindow = null;
-                }
-                return;
-            }
-
-            // Update last selected row
-            _lastSelectedRowIndex = selectedIndex;
-
-            if (selectedIndex < 0)
-            {
-                // No row selected - close map window if open
-                if (_currentMapWindow != null)
-                {
-                    _currentMapWindow.Close();
-                    _currentMapWindow = null;
-                }
-                return;
-            }
-
-            // Check if this row has geometries
-            if (_rowGeometries.TryGetValue(selectedIndex, out var geometries) && geometries.Count > 0)
-            {
-                try
-                {
-                    if (_currentMapWindow == null)
-                    {
-                        // Create new map window
-                        _currentMapWindow = new GeometryMapWindow
-                        {
-                            Owner = this
-                        };
-
-                        _currentMapWindow.Show();
-
-                        // Subscribe to closed event to clear reference
-                        _currentMapWindow.Closed += (s, args) =>
-                        {
-                            if (_currentMapWindow == s)
-                            {
-                                _currentMapWindow = null;
-                                _lastSelectedRowIndex = -1; // Reset selection tracking when map closes
-                                ResultsDataGrid.SelectedIndex = -1; // Deselect row when map closes
-                            }
-                        };
-                    }
-
-                    // Load geometries (will replace existing ones)
-                    _currentMapWindow.LoadGeometriesWithInfo(geometries);
-
-                    // Bring window to front if it was minimized or behind other windows
-                    if (_currentMapWindow.WindowState == WindowState.Minimized)
-                    {
-                        _currentMapWindow.WindowState = WindowState.Normal;
-                    }
-                    _currentMapWindow.Activate();
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error opening map window: {ex.Message}", "Map Error",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-            }
-            else
-            {
-                // Row has no geometries - close map window if open
-                if (_currentMapWindow != null)
-                {
-                    _currentMapWindow.Close();
-                    _currentMapWindow = null;
-                }
-            }
         }
 
         private void ProcessComplexColumns(DataTable dataTable)
@@ -721,7 +418,7 @@ namespace S3Browser
                                 // Check if it's a geometry column
                                 if (geometryColumns.TryGetValue(column, out bool isGeometry) && isGeometry)
                                 {
-                                    var wkt = ConvertGeometryToWkt(row[column]);
+                                    var wkt = GeometryHelper.ConvertToWkt(row[column]);
                                     newRow[column.ColumnName] = wkt;
 
                                     // Store WKT for map display
@@ -739,9 +436,19 @@ namespace S3Browser
                                     newRow[column.ColumnName] = ConvertToJson(row[column]);
                                 }
                             }
-                            catch
+                            catch (Exception ex)
                             {
-                                newRow[column.ColumnName] = row[column].ToString();
+                                // If JSON conversion fails, try one more time with the value
+                                try
+                                {
+                                    newRow[column.ColumnName] = ConvertToJson(row[column]);
+                                }
+                                catch
+                                {
+                                    // Last resort: use ToString but log the error
+                                    System.Diagnostics.Debug.WriteLine($"Failed to convert column {column.ColumnName}: {ex.Message}");
+                                    newRow[column.ColumnName] = $"[Error converting: {row[column]?.GetType().Name ?? "null"}]";
+                                }
                             }
                         }
                         else
@@ -803,7 +510,7 @@ namespace S3Browser
 
                 var options = new JsonSerializerOptions
                 {
-                    WriteIndented = true,
+                    WriteIndented = false,  // Compact JSON without indentation
                     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
                 };
                 return JsonSerializer.Serialize(extractedValue, options);
@@ -914,9 +621,9 @@ namespace S3Browser
                 return list;
             }
 
-            // Handle structs (complex objects with properties)
+            // Handle structs and complex objects with properties (both value types and reference types)
             if (!type.IsPrimitive && type != typeof(string) && type != typeof(DateTime) &&
-                type != typeof(decimal) && !type.IsEnum && type.IsClass)
+                type != typeof(decimal) && !type.IsEnum)
             {
                 // Try to extract properties using reflection
                 try
@@ -957,109 +664,18 @@ namespace S3Browser
             return value;
         }
 
-        private bool TryParseGeometry(byte[] wkb, out NetTopologySuite.Geometries.Geometry? geometry)
-        {
-            geometry = null;
-
-            if (wkb == null || wkb.Length < 5)
-                return false;
-
-            try
-            {
-                // Try both byte orders (little-endian and big-endian)
-                var reader = new WKBReader();
-                geometry = reader.Read(wkb);
-                return geometry is not null;
-            }
-            catch
-            {
-                // If standard WKB fails, might be a different format
-                return false;
-            }
-        }
-
-        private string ConvertGeometryToWkt(object value)
-        {
-            if (value == null) return "null";
-
-            try
-            {
-                byte[]? wkb = null;
-
-                // Handle both byte arrays and streams
-                if (value is byte[] byteArray)
-                {
-                    wkb = byteArray;
-                }
-                else if (value is UnmanagedMemoryStream stream)
-                {
-                    wkb = ReadStreamToBytes(stream);
-                }
-                else if (value is Stream streamBase)
-                {
-                    using (var ms = new MemoryStream())
-                    {
-                        streamBase.CopyTo(ms);
-                        wkb = ms.ToArray();
-                    }
-                }
-
-                if (wkb != null && wkb.Length > 0)
-                {
-                    if (TryParseGeometry(wkb, out var geometry) && geometry is not null)
-                    {
-                        var writer = new WKTWriter();
-                        return writer.Write(geometry);
-                    }
-                    else
-                    {
-                        // Not a valid geometry, convert to hex string
-                        return "0x" + BitConverter.ToString(wkb).Replace("-", "");
-                    }
-                }
-
-                return value.ToString() ?? "";
-            }
-            catch (Exception ex)
-            {
-                // If conversion fails, show as hex if possible
-                if (value is byte[] bytes)
-                {
-                    return "0x" + BitConverter.ToString(bytes).Replace("-", "");
-                }
-                return $"[Error: {ex.Message}]";
-            }
-        }
-
-        private byte[] ReadStreamToBytes(UnmanagedMemoryStream stream)
-        {
-            // Reset stream position to beginning
-            if (stream.CanSeek)
-            {
-                stream.Position = 0;
-            }
-
-            byte[] buffer = new byte[stream.Length];
-            stream.Read(buffer, 0, buffer.Length);
-
-            return buffer;
-        }
-
         private void CreateCustomColumns(DataTable dataTable)
         {
             foreach (DataColumn column in dataTable.Columns)
             {
-                // Check if this is a geometry column
+                // Check if this is a geometry column using GeometryHelper
                 bool isGeometryColumn = false;
                 foreach (DataRow row in dataTable.Rows)
                 {
                     if (row[column] != DBNull.Value && row[column] != null)
                     {
                         string value = row[column].ToString() ?? "";
-                        if (!string.IsNullOrWhiteSpace(value) &&
-                            (value.StartsWith("POINT") || value.StartsWith("LINESTRING") ||
-                             value.StartsWith("POLYGON") || value.StartsWith("MULTIPOINT") ||
-                             value.StartsWith("MULTILINESTRING") || value.StartsWith("MULTIPOLYGON")))
+                        if (GeometryHelper.IsWktGeometry(value))
                         {
                             isGeometryColumn = true;
                             break;
@@ -1078,65 +694,10 @@ namespace S3Browser
                     SortMemberPath = column.ColumnName, // Enable sorting by this column
                     CellTemplate = isGeometryColumn
                         ? CreateGeometryCellTemplate(column.ColumnName)
-                        : CreateExpandableCellTemplate(column.ColumnName)
+                        : CreateExpandableCellTemplate(column.ColumnName) // Use base class method
                 };
                 ResultsDataGrid.Columns.Add(templateColumn);
             }
-        }
-
-        private DataTemplate CreateExpandableCellTemplate(string columnName)
-        {
-            var template = new DataTemplate();
-
-            // Create a Grid to hold truncated text and expand button
-            var gridFactory = new FrameworkElementFactory(typeof(Grid));
-            gridFactory.SetValue(Grid.MarginProperty, new Thickness(2));
-            gridFactory.SetValue(Grid.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
-
-            // Column definitions
-            var col1 = new FrameworkElementFactory(typeof(ColumnDefinition));
-            col1.SetValue(ColumnDefinition.WidthProperty, GridLength.Auto); // Auto-size to content
-            gridFactory.AppendChild(col1);
-
-            var col2 = new FrameworkElementFactory(typeof(ColumnDefinition));
-            col2.SetValue(ColumnDefinition.WidthProperty, GridLength.Auto);
-            gridFactory.AppendChild(col2);
-
-            // TextBlock for content (truncated or full)
-            var textBlockFactory = new FrameworkElementFactory(typeof(TextBlock));
-            var textBinding = new Binding($"[{columnName}]");
-            textBinding.Converter = new SmartTruncateTextConverter();
-            textBlockFactory.SetBinding(TextBlock.TextProperty, textBinding);
-            textBlockFactory.SetValue(TextBlock.TextTrimmingProperty, TextTrimming.None);
-            textBlockFactory.SetValue(TextBlock.TextWrappingProperty, TextWrapping.NoWrap);
-            textBlockFactory.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
-            textBlockFactory.SetValue(TextBlock.PaddingProperty, new Thickness(4, 2, 4, 2));
-            textBlockFactory.SetValue(Grid.ColumnProperty, 0);
-            gridFactory.AppendChild(textBlockFactory);
-
-            // Button to expand (visibility bound to whether content is truncated)
-            var buttonFactory = new FrameworkElementFactory(typeof(Button));
-            buttonFactory.SetValue(Button.ContentProperty, "...");
-            buttonFactory.SetValue(Button.PaddingProperty, new Thickness(8, 2, 8, 2));
-            buttonFactory.SetValue(Button.MarginProperty, new Thickness(5, 0, 0, 0));
-            buttonFactory.SetValue(Button.CursorProperty, Cursors.Hand);
-            buttonFactory.SetValue(Button.VerticalAlignmentProperty, VerticalAlignment.Center);
-            buttonFactory.SetValue(Grid.ColumnProperty, 1);
-            buttonFactory.SetValue(Button.ToolTipProperty, "Click to view full content");
-            buttonFactory.AddHandler(Button.ClickEvent, new RoutedEventHandler(ExpandButton_Click));
-
-            // Bind button Tag to full text and Visibility to whether text needs expansion
-            var fullTextBinding = new Binding($"[{columnName}]");
-            buttonFactory.SetValue(Button.TagProperty, fullTextBinding);
-
-            var visibilityBinding = new Binding($"[{columnName}]");
-            visibilityBinding.Converter = new NeedsExpansionConverter();
-            buttonFactory.SetBinding(Button.VisibilityProperty, visibilityBinding);
-
-            gridFactory.AppendChild(buttonFactory);
-
-            template.VisualTree = gridFactory;
-            return template;
         }
 
         private DataTemplate CreateGeometryCellTemplate(string columnName)
@@ -1178,6 +739,7 @@ namespace S3Browser
             expandButtonFactory.SetValue(Button.VerticalAlignmentProperty, VerticalAlignment.Center);
             expandButtonFactory.SetValue(Grid.ColumnProperty, 1);
             expandButtonFactory.SetValue(Button.ToolTipProperty, "Click to view full content");
+            expandButtonFactory.AddHandler(Button.PreviewMouseDownEvent, new System.Windows.Input.MouseButtonEventHandler(ExpandButton_PreviewMouseDown), true);
             expandButtonFactory.AddHandler(Button.ClickEvent, new RoutedEventHandler(ExpandButton_Click));
 
             var fullTextBinding = new Binding($"[{columnName}]");
@@ -1193,299 +755,26 @@ namespace S3Browser
             return template;
         }
 
-        private void ExpandButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (sender is Button button && button.Tag is string fullText)
-            {
-                // Show full content in a dialog
-                var dialog = new Window
-                {
-                    Title = "Full Content",
-                    Width = 600,
-                    Height = 400,
-                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                    Owner = this
-                };
-
-                var scrollViewer = new ScrollViewer
-                {
-                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                    HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
-                };
-
-                var textBox = new TextBox
-                {
-                    Text = fullText ?? "",
-                    IsReadOnly = true,
-                    TextWrapping = TextWrapping.Wrap,
-                    FontFamily = new FontFamily("Consolas"),
-                    FontSize = 12,
-                    Padding = new Thickness(10),
-                    BorderThickness = new Thickness(0)
-                };
-
-                scrollViewer.Content = textBox;
-                dialog.Content = scrollViewer;
-                dialog.Show();
-            }
-        }
-
         private void ExpandAllButton_Click(object sender, RoutedEventArgs e)
         {
-            if (ResultsDataGrid.ItemsSource == null)
-            {
-                MessageBox.Show("No data loaded to display.", "No Data",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            if (ResultsDataGrid.ItemsSource is not DataView dataView || dataView.Count == 0)
-            {
-                MessageBox.Show("No data loaded to display.", "No Data",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            // Create comprehensive view window
-            var dialog = new Window
-            {
-                Title = $"All Data - {_fileName}",
-                Width = 900,
-                Height = 650,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = this
-            };
-
-            var grid = new Grid();
-            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            var scrollViewer = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Padding = new Thickness(10)
-            };
-
-            var stackPanel = new StackPanel();
-
-            // Build the content
-            var dataTable = dataView.Table ?? new DataTable();
-            int rowNumber = 1;
-
-            foreach (DataRow row in dataTable.Rows)
-            {
-                // Row header
-                var rowHeader = new TextBlock
-                {
-                    Text = $"Row {rowNumber}",
-                    FontSize = 16,
-                    FontWeight = FontWeights.Bold,
-                    Margin = new Thickness(0, rowNumber == 1 ? 0 : 20, 0, 10),
-                    Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(33, 150, 243))
-                };
-                stackPanel.Children.Add(rowHeader);
-
-                // Row separator
-                var separator = new System.Windows.Controls.Separator
-                {
-                    Margin = new Thickness(0, 0, 0, 10)
-                };
-                stackPanel.Children.Add(separator);
-
-                // Create a grid for each row's data
-                var rowGrid = new Grid
-                {
-                    Margin = new Thickness(10, 0, 0, 0)
-                };
-                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
-                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                int cellRow = 0;
-                foreach (DataColumn column in dataTable.Columns)
-                {
-                    rowGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-                    // Column name
-                    var columnNameBlock = new TextBlock
-                    {
-                        Text = column.ColumnName + ":",
-                        FontWeight = FontWeights.SemiBold,
-                        Margin = new Thickness(0, 0, 10, 5),
-                        VerticalAlignment = VerticalAlignment.Top
-                    };
-                    Grid.SetRow(columnNameBlock, cellRow);
-                    Grid.SetColumn(columnNameBlock, 0);
-                    rowGrid.Children.Add(columnNameBlock);
-
-                    // Cell value
-                    var cellValue = row[column];
-                    var cellText = cellValue == DBNull.Value || cellValue == null
-                        ? "(null)"
-                        : cellValue.ToString() ?? "";
-
-                    var valueBlock = new TextBlock
-                    {
-                        Text = cellText,
-                        TextWrapping = TextWrapping.Wrap,
-                        FontFamily = new FontFamily("Consolas"),
-                        Margin = new Thickness(0, 0, 0, 5),
-                        Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 245, 245)),
-                        Padding = new Thickness(5)
-                    };
-                    Grid.SetRow(valueBlock, cellRow);
-                    Grid.SetColumn(valueBlock, 1);
-                    rowGrid.Children.Add(valueBlock);
-
-                    cellRow++;
-                }
-
-                stackPanel.Children.Add(rowGrid);
-                rowNumber++;
-            }
-
-            scrollViewer.Content = stackPanel;
-            Grid.SetRow(scrollViewer, 0);
-            grid.Children.Add(scrollViewer);
-
-            // Status bar
-            var statusBar = new System.Windows.Controls.Primitives.StatusBar();
-            var statusText = new TextBlock
-            {
-                Text = $"Showing {dataTable.Rows.Count:N0} rows with {dataTable.Columns.Count} columns"
-            };
-            var statusItem = new System.Windows.Controls.Primitives.StatusBarItem { Content = statusText };
-            statusBar.Items.Add(statusItem);
-            Grid.SetRow(statusBar, 1);
-            grid.Children.Add(statusBar);
-
-            dialog.Content = grid;
-            dialog.Show();
-        }
-
-        private void ResultsDataGrid_PreviewKeyDown(object sender, KeyEventArgs e)
-        {
-            // Handle Ctrl+C to copy full cell content
-            if (e.Key == Key.C && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
-            {
-                var currentCell = ResultsDataGrid.CurrentCell;
-                if (currentCell.IsValid && currentCell.Item != null)
-                {
-                    try
-                    {
-                        // Get the column name from the current cell
-                        var column = currentCell.Column;
-                        if (column != null)
-                        {
-                            // Get the row data
-                            var rowView = currentCell.Item as DataRowView;
-                            var dataTable = rowView?.Row?.Table;
-                            if (dataTable != null)
-                            {
-                                // Get the full cell content (not truncated)
-                                var columnName = column.Header?.ToString() ?? string.Empty;
-                                if (!string.IsNullOrEmpty(columnName) && dataTable.Columns.Contains(columnName))
-                                {
-#pragma warning disable CS8602 // Dereference of a possibly null reference - rowView is guaranteed non-null when dataTable is not null
-                                    var cellValue = rowView![columnName];
-#pragma warning restore CS8602
-                                    var fullText = cellValue == DBNull.Value || cellValue == null
-                                        ? string.Empty
-                                        : cellValue.ToString() ?? string.Empty;
-
-                                    // Copy the full content to clipboard
-                                    if (!string.IsNullOrEmpty(fullText))
-                                    {
-                                        Clipboard.SetText(fullText);
-                                        e.Handled = true; // Prevent default copy behavior
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        // Log error but don't show message box to avoid interrupting user
-                        System.Diagnostics.Debug.WriteLine($"Error copying cell content: {ex.Message}");
-                    }
-                }
-            }
+            // Use base class method
+            HandleExpandAllButtonClick(sender, e);
         }
 
         private void FilePathBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            try
-            {
-                if (!string.IsNullOrEmpty(_displayPath))
-                {
-                    // Retry clipboard operation if it fails (common issue when clipboard is busy)
-                    bool clipboardSet = false;
-                    for (int i = 0; i < 3; i++)
-                    {
-                        try
-                        {
-                            Clipboard.SetDataObject(_displayPath, true);
-                            clipboardSet = true;
-                            break;
-                        }
-                        catch (System.Runtime.InteropServices.COMException)
-                        {
-                            if (i < 2)
-                            {
-                                System.Threading.Thread.Sleep(100);
-                            }
-                            else
-                            {
-                                throw;
-                            }
-                        }
-                    }
-
-                    if (clipboardSet)
-                    {
-                        StatusTextBlock.Text = $"Copied to clipboard: {_displayPath}";
-
-                        // Flash the background to indicate copy
-                        var border = sender as Border;
-                        if (border != null)
-                        {
-                            var originalBrush = border.Background;
-                            border.Background = new SolidColorBrush(Color.FromRgb(200, 230, 201)); // Light green
-                            Task.Delay(200).ContinueWith(_ => Dispatcher.Invoke(() => border.Background = originalBrush));
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to copy path: {ex.Message}", "Error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            DataViewerUIHelper.CopyPathToClipboard(_displayPath, StatusTextBlock, sender as Border);
         }
 
         protected override void OnClosed(EventArgs e)
         {
             base.OnClosed(e);
 
-            // Close map window if open
-            if (_currentMapWindow != null)
-            {
-                _currentMapWindow.Close();
-                _currentMapWindow = null;
-            }
+            // Use base class cleanup
+            CleanupResources();
 
-            // Cancel any ongoing operations
-            _cancellationTokenSource?.Cancel();
-            _cancellationTokenSource?.Dispose();
-
-            // Dispose DuckDB connection (this will automatically drop the table and free memory)
-            if (_duckDbConnection != null)
-            {
-                // Note: No need to explicitly drop the table - it will be destroyed when connection is disposed
-                // The in-memory table and all its data will be freed when the connection closes
-                DuckDbManager.Instance.ReleaseConnection(_duckDbConnection);
-                _duckDbConnection = null;
-            }
+            // Note: No need to explicitly drop the table - it will be destroyed when connection is disposed
+            // The in-memory table and all its data will be freed when the connection closes
         }
     }
 }
