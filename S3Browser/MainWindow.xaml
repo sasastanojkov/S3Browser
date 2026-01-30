@@ -171,6 +171,88 @@
                 <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
                 <DataGridTextColumn Header="Size" Binding="{Binding Size}" Width="120"/>
                 <DataGridTextColumn Header="Last Modified" Binding="{Binding LastModified}" Width="150"/>
+                <DataGridTemplateColumn Header="Actions" Width="120">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <!-- Download Button (shown when not downloading) -->
+                                <Button Tag="{Binding}"
+                                        Click="DownloadFile_Click"
+                                        Width="100"
+                                        Height="20"
+                                        Background="#FF9C27B0"
+                                        Foreground="White"
+                                        BorderThickness="0"
+                                        FontSize="10"
+                                        Padding="2"
+                                        Cursor="Hand"
+                                        ToolTip="Download this file">
+                                    <Button.Content>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE896;" FontSize="10" Margin="0,0,3,0"/>
+                                            <TextBlock Text="Download" FontSize="9"/>
+                                        </StackPanel>
+                                    </Button.Content>
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding Type}" Value="File"/>
+                                                        <Condition Binding="{Binding IsDownloading}" Value="False"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                
+                                <!-- Progress Bar and Cancel Button (shown when downloading) -->
+                                <Grid VerticalAlignment="Center">
+                                    <Grid.Style>
+                                        <Style TargetType="Grid">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDownloading}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Grid.Style>
+                                    
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    
+                                    <ProgressBar Grid.Column="0"
+                                                 Value="{Binding DownloadProgress}"
+                                                 Minimum="0"
+                                                 Maximum="100"
+                                                 Height="20"
+                                                 Margin="0,0,2,0"/>
+                                    
+                                    <Button Grid.Column="1"
+                                            Content="X"
+                                            Tag="{Binding}"
+                                            Click="DownloadFile_Click"
+                                            Width="20"
+                                            Height="20"
+                                            Background="#FFFF5252"
+                                            Foreground="White"
+                                            BorderThickness="0"
+                                            FontSize="10"
+                                            FontWeight="Bold"
+                                            Padding="0"
+                                            Cursor="Hand"
+                                            ToolTip="Cancel download"/>
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
             </DataGrid.Columns>
         </DataGrid>
 

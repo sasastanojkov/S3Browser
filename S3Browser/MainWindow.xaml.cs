@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using Microsoft.Win32;
 using S3Browser.Helpers;
@@ -914,6 +915,135 @@ namespace S3Browser
             Application.Current.Shutdown();
         }
 
+        private async void DownloadFile_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not S3Item fileItem)
+                return;
+
+            if (_currentBucket == null || string.IsNullOrEmpty(fileItem.FullKey))
+                return;
+
+            // Check if already downloading
+            if (fileItem.IsDownloading)
+            {
+                // Cancel the download
+                fileItem.DownloadCancellationTokenSource?.Cancel();
+                return;
+            }
+
+            // Ask user where to save the file
+            var saveDialog = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = fileItem.Name,
+                Title = "Save File As"
+            };
+
+            if (saveDialog.ShowDialog() != true)
+                return;
+
+            string localFilePath = saveDialog.FileName;
+
+            // Start download
+            await DownloadSingleFileAsync(fileItem, localFilePath);
+        }
+
+        private async Task DownloadSingleFileAsync(S3Item fileItem, string localFilePath)
+        {
+            if (_currentBucket == null || string.IsNullOrEmpty(fileItem.FullKey))
+                return;
+
+            // Create cancellation token source
+            fileItem.DownloadCancellationTokenSource = new CancellationTokenSource();
+            var cancellationToken = fileItem.DownloadCancellationTokenSource.Token;
+
+            try
+            {
+                fileItem.IsDownloading = true;
+                fileItem.DownloadProgress = 0;
+
+                StatusTextBlock.Text = $"Downloading {fileItem.Name}...";
+                StatusProgressBar.Visibility = Visibility.Visible;
+
+                // Get the object
+                using (var response = await S3Manager.Instance.GetObjectAsync(_currentBucket, fileItem.FullKey))
+                {
+                    long totalBytes = response.ContentLength;
+                    long downloadedBytes = 0;
+
+                    // Create directory if needed
+                    string? directory = Path.GetDirectoryName(localFilePath);
+                    if (!string.IsNullOrEmpty(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
+
+                    // Download with progress tracking
+                    using (var responseStream = response.ResponseStream)
+                    using (var fileStream = File.Create(localFilePath))
+                    {
+                        byte[] buffer = new byte[81920]; // 80 KB buffer
+                        int bytesRead;
+
+                        while ((bytesRead = await responseStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                        {
+                            await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
+                            downloadedBytes += bytesRead;
+
+                            // Update progress
+                            if (totalBytes > 0)
+                            {
+                                double progress = (double)downloadedBytes / totalBytes * 100;
+                                fileItem.DownloadProgress = progress;
+                                StatusTextBlock.Text = $"Downloading {fileItem.Name}: {progress:F1}% ({FileHelper.FormatFileSize(downloadedBytes)} / {FileHelper.FormatFileSize(totalBytes)})";
+                            }
+                        }
+                    }
+                }
+
+                StatusTextBlock.Text = $"Downloaded {fileItem.Name} successfully";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
+
+                MessageBox.Show($"File downloaded successfully to:\n{localFilePath}", "Download Complete",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                StatusTextBlock.Text = "Download cancelled";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
+
+                // Delete partial file
+                try
+                {
+                    if (File.Exists(localFilePath))
+                    {
+                        File.Delete(localFilePath);
+                    }
+                }
+                catch
+                {
+                    // Ignore errors during cleanup
+                }
+
+                MessageBox.Show($"Download of {fileItem.Name} was cancelled.", "Download Cancelled",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = "Download failed";
+                StatusProgressBar.Visibility = Visibility.Collapsed;
+
+                MessageBox.Show($"Error downloading file: {ex.Message}", "Download Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                fileItem.IsDownloading = false;
+                fileItem.DownloadProgress = 0;
+                fileItem.DownloadCancellationTokenSource?.Dispose();
+                fileItem.DownloadCancellationTokenSource = null;
+            }
+        }
+
         private async void DownloadAllButton_Click(object sender, RoutedEventArgs e)
         {
             if (_currentBucket == null)
@@ -1101,8 +1231,12 @@ namespace S3Browser
     /// <summary>
     /// Represents an item in S3 (bucket, folder, or file) for display in the UI.
     /// </summary>
-    public class S3Item
+    public class S3Item : System.ComponentModel.INotifyPropertyChanged
     {
+        private bool _isDownloading;
+        private double _downloadProgress;
+        private CancellationTokenSource? _downloadCancellationTokenSource;
+
         /// <summary>
         /// Gets or sets the type of the item ("Bucket", "Folder", or "File").
         /// </summary>
@@ -1138,5 +1272,53 @@ namespace S3Browser
         /// Null for buckets, contains full path with prefix for files and folders.
         /// </summary>
         public string? FullKey { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether gets or sets whether this file is currently being downloaded.
+        /// </summary>
+        public bool IsDownloading
+        {
+            get => _isDownloading;
+            set
+            {
+                if (_isDownloading != value)
+                {
+                    _isDownloading = value;
+                    OnPropertyChanged(nameof(IsDownloading));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the download progress (0-100).
+        /// </summary>
+        public double DownloadProgress
+        {
+            get => _downloadProgress;
+            set
+            {
+                if (Math.Abs(_downloadProgress - value) > 0.01)
+                {
+                    _downloadProgress = value;
+                    OnPropertyChanged(nameof(DownloadProgress));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the cancellation token source for the download operation.
+        /// </summary>
+        public CancellationTokenSource? DownloadCancellationTokenSource
+        {
+            get => _downloadCancellationTokenSource;
+            set => _downloadCancellationTokenSource = value;
+        }
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+        protected virtual void OnPropertyChanged(string propertyName)
+        {
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(propertyName));
+        }
     }
 }
