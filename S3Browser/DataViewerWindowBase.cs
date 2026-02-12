@@ -228,8 +228,17 @@ namespace S3Browser
                 return;
             }
 
+            // Get the actual DataRowView from the selected item to handle sorting correctly
+            int actualRowIndex = selectedIndex;
+            if (DataGrid.SelectedItem is DataRowView rowView)
+            {
+                // Get the original row index from the DataTable
+                // This ensures we get the correct geometry even after sorting
+                actualRowIndex = rowView.Row.Table?.Rows.IndexOf(rowView.Row) ?? selectedIndex;
+            }
+
             // Check if this row has geometries
-            if (_rowGeometries.TryGetValue(selectedIndex, out var geometries) && geometries.Count > 0)
+            if (_rowGeometries.TryGetValue(actualRowIndex, out var geometries) && geometries.Count > 0)
             {
                 try
                 {
