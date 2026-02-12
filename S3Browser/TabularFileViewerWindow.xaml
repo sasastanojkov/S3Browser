@@ -48,6 +48,7 @@ WindowStartupLocation="CenterScreen">
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <CheckBox Grid.Column="0"
@@ -74,6 +75,18 @@ WindowStartupLocation="CenterScreen">
             </StackPanel>
 
             <Button Grid.Column="3"
+                    Content="DDL Query"
+                    Width="120"
+                    Height="30"
+                    Margin="0,0,10,0"
+                    Background="#FFFF9800"
+                    Foreground="White"
+                    BorderThickness="0"
+                    FontWeight="SemiBold"
+                    Click="DdlQueryButton_Click"
+                    ToolTip="Create tables and views using DDL queries"/>
+
+            <Button Grid.Column="4"
                     Content="Edit Query"
                     Width="100"
                     Height="30"
@@ -81,7 +94,7 @@ WindowStartupLocation="CenterScreen">
                     Click="EditQueryButton_Click"
                     ToolTip="Edit SQL query"/>
 
-            <Button Grid.Column="4"
+            <Button Grid.Column="5"
                     Content="Expand All"
                     Width="100"
                     Height="30"
@@ -89,7 +102,7 @@ WindowStartupLocation="CenterScreen">
                     Click="ExpandAllButton_Click"
                     ToolTip="Show all data in detailed view"/>
 
-            <Button Grid.Column="5"
+            <Button Grid.Column="6"
                     Content="Reload"
                     Width="100"
                     Height="30"

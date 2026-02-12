@@ -337,5 +337,36 @@ namespace S3Browser
         /// Abstract method for executing new queries. Must be implemented by derived classes.
         /// </summary>
         public abstract void ExecuteNewQuery(string newQuery);
+
+        /// <summary>
+        /// Gets the DuckDB connection used by this viewer window.
+        /// </summary>
+        public DuckDBConnection? GetDuckDbConnection()
+        {
+            return _duckDbConnection;
+        }
+
+        /// <summary>
+        /// Gets the bucket name associated with this viewer window.
+        /// Must be implemented by derived classes.
+        /// </summary>
+        public abstract string GetBucketName();
+
+        /// <summary>
+        /// Gets context information about the current file/folder being viewed.
+        /// Uses the FileName property by default.
+        /// </summary>
+        public virtual string GetContextInfo()
+        {
+            return FileName;
+        }
+
+        /// <summary>
+        /// Gets the last executed query that produced the current results.
+        /// </summary>
+        public string? GetLastExecutedQuery()
+        {
+            return _lastExecutedQuery;
+        }
     }
 }

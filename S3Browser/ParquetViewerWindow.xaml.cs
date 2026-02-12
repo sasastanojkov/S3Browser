@@ -55,18 +55,25 @@ namespace S3Browser
             ResultsDataGrid.PreviewKeyDown += HandleResultsDataGridPreviewKeyDown;
 
             // Build the S3 path that will be used
-            if (_isWildcard)
+            // Don't show path when using custom query since query may reference multiple paths or tables
+            if (!string.IsNullOrEmpty(customQuery))
+            {
+                _displayPath = "Custom Query";
+                FileNameTextBlock.Text = "Custom Query Result";
+            }
+            else if (_isWildcard)
             {
                 var prefix = _key.Replace("*.parquet", "");
                 _displayPath = $"s3://{_bucketName}/{prefix}*.parquet";
+                FileNameTextBlock.Text = _displayPath;
             }
             else
             {
                 _displayPath = $"s3://{_bucketName}/{_key}";
+                FileNameTextBlock.Text = _displayPath;
             }
 
-            // Set display text and title
-            FileNameTextBlock.Text = _displayPath;
+            // Set window title
             Title = fileName;
 
             // Create a dedicated DuckDB connection for this window with S3 access
@@ -166,26 +173,42 @@ namespace S3Browser
                     LoadingMessageTextBlock.Text = "Executing query...";
                     StatusTextBlock.Text = "Querying parquet file(s)...";
 
-                    // If loadAsTable is true, create a table first
+                    // If loadAsTable is true, create a table first (only if it doesn't exist)
                     if (_loadAsTable && _isWildcard)
                     {
-                        LoadingMessageTextBlock.Text = "Creating table from parquet files...";
-                        StatusTextBlock.Text = "Loading data into table...";
+                        // Check if table already exists
+                        if (_duckDbConnection == null)
+                            throw new InvalidOperationException("DuckDB connection is not initialized.");
 
-                        // Create table on background thread using DuckDbManager
-                        await Task.Run(() =>
+                        cancellationToken.ThrowIfCancellationRequested();
+                        bool tableExists = DuckDbManager.Instance.TableExists(_duckDbConnection, _tableName);
+
+                        if (!tableExists)
                         {
-                            cancellationToken.ThrowIfCancellationRequested();
+                            // Table doesn't exist, create it
+                            LoadingMessageTextBlock.Text = "Creating table from parquet files...";
+                            StatusTextBlock.Text = "Loading data into table...";
 
-                            if (_duckDbConnection == null)
+                            await Task.Run(() =>
                             {
-                                throw new InvalidOperationException("DuckDB connection is not initialized.");
-                            }
+                                cancellationToken.ThrowIfCancellationRequested();
 
-                            // Create table from all parquet files
-                            string createTableCommand = $"CREATE TABLE {_tableName} AS SELECT * FROM read_parquet('{s3Path}')";
-                            DuckDbManager.Instance.ExecuteNonQuery(_duckDbConnection, createTableCommand, cancellationToken);
-                        }, cancellationToken);
+                                if (_duckDbConnection == null)
+                                {
+                                    throw new InvalidOperationException("DuckDB connection is not initialized.");
+                                }
+
+                                // Create table from all parquet files (only once)
+                                string createTableCommand = $"CREATE TABLE {_tableName} AS SELECT * FROM read_parquet('{s3Path}')";
+                                DuckDbManager.Instance.ExecuteNonQuery(_duckDbConnection, createTableCommand, cancellationToken);
+                            }, cancellationToken);
+                        }
+                        else
+                        {
+                            // Table already exists, just use it
+                            LoadingMessageTextBlock.Text = "Using existing table...";
+                            StatusTextBlock.Text = "Reading from cached table...";
+                        }
 
                         LoadingMessageTextBlock.Text = "Querying table...";
                         StatusTextBlock.Text = "Reading from table...";
@@ -263,7 +286,16 @@ namespace S3Browser
             {
                 // Re-enable controls and hide loading overlay
                 LoadingOverlay.Visibility = Visibility.Collapsed;
-                RowLimitComboBox.IsEnabled = true;
+
+                // Disable row limit control when custom query is in use
+                if (!string.IsNullOrEmpty(_customQuery))
+                {
+                    RowLimitComboBox.IsEnabled = false;
+                }
+                else
+                {
+                    RowLimitComboBox.IsEnabled = true;
+                }
             }
         }
 
@@ -311,11 +343,14 @@ namespace S3Browser
                 }
 
                 // Open query editor dialog with the current query
-                var queryDialog = new QueryEditorDialog(
+                var queryDialog = new SqlQueryDialog(
                     _bucketName,
                     queryToEdit,
                     _fileName,
-                    this); // Pass reference to this window for re-execution
+                    this) // Pass reference to this window for re-execution
+                {
+                    Owner = this // Center dialog on this window
+                };
 
                 queryDialog.Show();
             }
@@ -345,6 +380,58 @@ namespace S3Browser
                 WindowState = WindowState.Normal;
             }
             Activate();
+        }
+
+        /// <summary>
+        /// Gets the bucket name associated with this viewer window.
+        /// </summary>
+        public override string GetBucketName()
+        {
+            return _bucketName;
+        }
+
+        private void DdlQueryButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_duckDbConnection == null)
+                {
+                    MessageBox.Show("DuckDB connection is not available.", "Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                // Generate a default CREATE TABLE query based on last executed query
+                string? initialQuery = null;
+                if (!string.IsNullOrEmpty(_lastExecutedQuery))
+                {
+                    // Suggest a CREATE TABLE statement based on the current query
+                    initialQuery = $"CREATE TABLE my_data AS ({_lastExecutedQuery})";
+                }
+                else
+                {
+                    // Provide a template
+                    string s3Path = $"s3://{_bucketName}/{_key}";
+                    initialQuery = $"CREATE TABLE my_data AS SELECT * FROM read_parquet('{s3Path}')";
+                }
+
+                // Open DDL query dialog
+                var ddlQueryDialog = new SqlQueryDialog(
+                    _duckDbConnection,
+                    _bucketName,
+                    _fileName,
+                    initialQuery)
+                {
+                    Owner = this // Center dialog on this window
+                };
+
+                ddlQueryDialog.Show();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening DDL query editor: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void CloseButton_Click(object sender, RoutedEventArgs e)

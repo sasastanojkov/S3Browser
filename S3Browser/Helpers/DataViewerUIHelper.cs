@@ -128,14 +128,17 @@ namespace S3Browser.Helpers
                         cellText = FormatCellValue(cellValue);
                     }
 
-                    var valueBlock = new TextBlock
+                    var valueBlock = new TextBox
                     {
                         Text = cellText,
                         TextWrapping = TextWrapping.Wrap,
                         FontFamily = new FontFamily("Consolas"),
                         Margin = new Thickness(0, 0, 0, 5),
                         Background = new SolidColorBrush(Color.FromRgb(245, 245, 245)),
-                        Padding = new Thickness(5)
+                        Padding = new Thickness(5),
+                        IsReadOnly = true,
+                        BorderThickness = new Thickness(0),
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto
                     };
                     Grid.SetRow(valueBlock, cellRow);
                     Grid.SetColumn(valueBlock, 1);

@@ -58,6 +58,17 @@ WindowStartupLocation="CenterScreen">
             </StackPanel>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="DdlQueryButton"
+                        Content="DDL Query"
+                        Width="130"
+                        Height="30"
+                        Background="#FFFF9800"
+                        Foreground="White"
+                        BorderThickness="0"
+                        FontWeight="SemiBold"
+                        Click="DdlQueryButton_Click"
+                        Margin="0,0,10,0"
+                        ToolTip="Create tables and views using DDL queries"/>
                 <Button x:Name="EditQueryButton"
                         Content="Edit Query"
                         Width="120"

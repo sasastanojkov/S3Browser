@@ -1,0 +1,117 @@
+<Window x:Class="S3Browser.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Settings" 
+        Height="500" 
+        Width="550"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Settings Content -->
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- Table Mode Settings -->
+                <GroupBox Header="Table Mode Settings" Margin="0,0,0,15" Padding="10">
+                    <StackPanel>
+                        <TextBlock Text="Maximum Table Size (MB):" 
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,0,5"/>
+                        <TextBlock Text="Maximum size of parquet files that can be loaded into table mode." 
+                                   TextWrapping="Wrap"
+                                   Foreground="Gray"
+                                   FontSize="11"
+                                   Margin="0,0,0,8"/>
+                        
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            
+                            <Slider x:Name="MaxTableSizeSlider"
+                                    Grid.Column="0"
+                                    Minimum="100"
+                                    Maximum="2000"
+                                    TickFrequency="100"
+                                    IsSnapToTickEnabled="True"
+                                    Value="{Binding MaxTableSizeMB, Mode=TwoWay}"
+                                    VerticalAlignment="Center"/>
+                            
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding MaxTableSizeMB, StringFormat='{}{0} MB'}"
+                                       FontWeight="Bold"
+                                       FontSize="14"
+                                       Width="80"
+                                       TextAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Margin="10,0,0,0"/>
+                        </Grid>
+                        
+                        <TextBlock Text="Range: 100 - 2000 MB (larger files will use streaming mode)" 
+                                   Foreground="Gray"
+                                   FontSize="10"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Information -->
+                <Border BorderBrush="#FF2196F3" 
+                        BorderThickness="1" 
+                        Background="#FFF3F9FF"
+                        Padding="10"
+                        CornerRadius="3">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" 
+                                   Foreground="#FF2196F3"
+                                   Margin="0,0,0,5">
+                            <Run FontFamily="Segoe MDL2 Assets" Text="&#xE946;"/>
+                            <Run Text=" Information"/>
+                        </TextBlock>
+                        <TextBlock TextWrapping="Wrap" 
+                                   FontSize="11"
+                                   Foreground="#FF1976D2">
+                            Settings are saved automatically when you click OK.
+                            Changes will take effect for newly opened windows.
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="1" 
+                    Orientation="Horizontal" 
+                    HorizontalAlignment="Right" 
+                    Margin="0,15,0,0">
+            <Button Content="Reset to Defaults" 
+                    Width="130" 
+                    Height="32"
+                    Click="ResetButton_Click" 
+                    Margin="0,0,10,0"
+                    ToolTip="Reset all settings to their default values"/>
+            <Button Content="Cancel" 
+                    Width="80" 
+                    Height="32"
+                    IsCancel="True"
+                    Click="CancelButton_Click" 
+                    Margin="0,0,10,0"/>
+            <Button Content="OK" 
+                    Width="80" 
+                    Height="32"
+                    IsDefault="True"
+                    Click="OKButton_Click"
+                    Background="#FF4CAF50"
+                    Foreground="White"
+                    BorderThickness="0"
+                    FontWeight="SemiBold"/>
+        </StackPanel>
+    </Grid>
+</Window>

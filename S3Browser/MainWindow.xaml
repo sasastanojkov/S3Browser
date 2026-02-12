@@ -28,7 +28,35 @@
                     </MenuItem.Icon>
                 </MenuItem>
                 <Separator/>
+                <MenuItem x:Name="SettingsMenuItem"
+                          Header="_Settings..."
+                          Click="SettingsMenuItem_Click"
+                          ToolTip="Configure application settings">
+                    <MenuItem.Icon>
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <Separator/>
                 <MenuItem Header="E_xit" Click="ExitMenuItem_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Bookmarks">
+                <MenuItem x:Name="ViewBookmarksMenuItem"
+                          Header="_View Bookmarks..."
+                          Click="ViewBookmarksMenuItem_Click"
+                          ToolTip="View and manage saved bookmarks">
+                    <MenuItem.Icon>
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE734;"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <MenuItem x:Name="AddBookmarkMenuItem"
+                          Header="_Add Current Location"
+                          Click="AddBookmarkMenuItem_Click"
+                          IsEnabled="False"
+                          ToolTip="Save current location as a bookmark">
+                    <MenuItem.Icon>
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE735;"/>
+                    </MenuItem.Icon>
+                </MenuItem>
             </MenuItem>
         </Menu>
 
@@ -42,6 +70,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
@@ -68,6 +97,22 @@
                     Click="GoButton_Click"/>
             
             <Button Grid.Column="3"
+                    x:Name="BookmarkButton"
+                    Width="28" 
+                    Height="28"
+                    Margin="10,0,0,0"
+                    Click="BookmarkButton_Click"
+                    Visibility="Collapsed"
+                    ToolTip="Add current location to bookmarks"
+                    Background="#FFFFC107"
+                    BorderThickness="0">
+                <TextBlock FontFamily="Segoe MDL2 Assets" 
+                           Text="&#xE734;" 
+                           FontSize="16"
+                           Foreground="White"/>
+            </Button>
+            
+            <Button Grid.Column="4"
                     x:Name="HomeButton"
                     Width="80" 
                     Height="28"
@@ -81,7 +126,7 @@
                 </TextBlock>
             </Button>
             
-            <Button Grid.Column="4"
+            <Button Grid.Column="5"
                     x:Name="DownloadAllButton"
                     Width="120" 
                     Height="28"
@@ -175,7 +220,7 @@
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Grid>
-                                <!-- Download Button (shown when not downloading) -->
+                                <!-- Download Button (shown when not downloading and file size > 0) -->
                                 <Button Tag="{Binding}"
                                         Click="DownloadFile_Click"
                                         Width="100"
@@ -201,6 +246,7 @@
                                                     <MultiDataTrigger.Conditions>
                                                         <Condition Binding="{Binding Type}" Value="File"/>
                                                         <Condition Binding="{Binding IsDownloading}" Value="False"/>
+                                                        <Condition Binding="{Binding HasContent}" Value="True"/>
                                                     </MultiDataTrigger.Conditions>
                                                     <Setter Property="Visibility" Value="Visible"/>
                                                 </MultiDataTrigger>

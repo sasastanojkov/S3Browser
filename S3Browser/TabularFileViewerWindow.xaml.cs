@@ -46,11 +46,22 @@ namespace S3Browser
             _customQuery = customQuery;
 
             // Build S3 path for display
-            _displayPath = $"s3://{_bucketName}/{_key}";
+            // Don't show path when using custom query since query may reference multiple paths or tables
+            if (!string.IsNullOrEmpty(customQuery))
+            {
+                _displayPath = "Custom Query";
+                FileNameTextBlock.Text = "Custom Query Result";
+                FilePathTextBlock.Text = "";
+                FilePathTextBlock.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                _displayPath = $"s3://{_bucketName}/{_key}";
+                FileNameTextBlock.Text = $"{_fileType.ToUpperInvariant()} File: {fileName}";
+                FilePathTextBlock.Text = _displayPath;
+                FilePathTextBlock.Visibility = Visibility.Visible;
+            }
 
-            FileNameTextBlock.Text = $"{_fileType.ToUpperInvariant()} File: {fileName}";
-            FilePathTextBlock.Text = _displayPath;
-            FilePathTextBlock.Visibility = Visibility.Visible;
             Title = $"{_fileType.ToUpperInvariant()} Viewer - {fileName}";
 
             // Subscribe to row selection changes for geometry display
@@ -187,8 +198,18 @@ namespace S3Browser
             {
                 // Re-enable controls and hide loading overlay
                 LoadingOverlay.Visibility = Visibility.Collapsed;
-                HasHeaderCheckBox.IsEnabled = true;
-                RowLimitComboBox.IsEnabled = true;
+
+                // Disable row limit and header controls when custom query is in use
+                if (!string.IsNullOrEmpty(_customQuery))
+                {
+                    HasHeaderCheckBox.IsEnabled = false;
+                    RowLimitComboBox.IsEnabled = false;
+                }
+                else
+                {
+                    HasHeaderCheckBox.IsEnabled = true;
+                    RowLimitComboBox.IsEnabled = true;
+                }
             }
         }
 
@@ -275,17 +296,67 @@ namespace S3Browser
                 }
 
                 // Open query editor dialog with the current query
-                var queryDialog = new QueryEditorDialog(
+                var queryDialog = new SqlQueryDialog(
                     _bucketName,
                     queryToEdit,
                     _fileName,
-                    this); // Pass reference to this window for re-execution
+                    this) // Pass reference to this window for re-execution
+                {
+                    Owner = this // Center dialog on this window
+                };
 
                 queryDialog.Show();
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Error opening query editor: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void DdlQueryButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_duckDbConnection == null)
+                {
+                    MessageBox.Show("DuckDB connection is not available.", "Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                // Generate a default CREATE TABLE query based on last executed query
+                string? initialQuery = null;
+                if (!string.IsNullOrEmpty(_lastExecutedQuery))
+                {
+                    // Suggest a CREATE TABLE statement based on the current query
+                    initialQuery = $"CREATE TABLE my_data AS ({_lastExecutedQuery})";
+                }
+                else
+                {
+                    // Provide a template
+                    string s3Path = $"s3://{_bucketName}/{_key}";
+                    bool hasHeader = HasHeaderCheckBox.IsChecked ?? false;
+                    string delimiter = _fileType == "tsv" ? "E'\\t'" : "','";
+                    string headerParam = hasHeader ? "true" : "false";
+                    initialQuery = $"CREATE TABLE my_data AS SELECT * FROM read_csv('{s3Path}', delim={delimiter}, header={headerParam}, auto_detect=true)";
+                }
+
+                // Open DDL query dialog
+                var ddlQueryDialog = new SqlQueryDialog(
+                    _duckDbConnection,
+                    _bucketName,
+                    _fileName,
+                    initialQuery)
+                {
+                    Owner = this // Center dialog on this window
+                };
+
+                ddlQueryDialog.Show();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening DDL query editor: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -309,6 +380,14 @@ namespace S3Browser
                 WindowState = WindowState.Normal;
             }
             Activate();
+        }
+
+        /// <summary>
+        /// Gets the bucket name associated with this viewer window.
+        /// </summary>
+        public override string GetBucketName()
+        {
+            return _bucketName;
         }
 
         private void ExpandAllButton_Click(object sender, RoutedEventArgs e)

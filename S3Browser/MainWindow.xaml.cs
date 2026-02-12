@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using Microsoft.Win32;
 using S3Browser.Helpers;
+using S3Browser.Models;
 using S3Browser.Services;
 
 namespace S3Browser
@@ -254,10 +255,15 @@ namespace S3Browser
                 TitleTextBlock.Text = S3Manager.Instance.IsAnonymousMode() ? "Anonymous Access Mode" : "AWS S3 Buckets";
                 S3PathTextBox.Text = "";
                 HomeButton.Visibility = Visibility.Collapsed;
+                BookmarkButton.Visibility = Visibility.Collapsed;
+                AddBookmarkMenuItem.IsEnabled = false;
             }
             else
             {
                 HomeButton.Visibility = Visibility.Visible;
+                BookmarkButton.Visibility = Visibility.Visible;
+                AddBookmarkMenuItem.IsEnabled = true;
+
                 if (string.IsNullOrEmpty(_currentPrefix))
                 {
                     TitleTextBlock.Text = $"Bucket: {_currentBucket}";
@@ -739,13 +745,15 @@ namespace S3Browser
                 var parquetFiles = Items.Where(item => item.Type == "File" && IsParquetFile(item.Name)).ToList();
                 long totalSizeBytes = parquetFiles.Sum(file => file.SizeInBytes ?? 0);
 
-                // Check if total size exceeds 500MB (524,288,000 bytes)
-                const long maxSizeBytes = 500L * 1024L * 1024L;
+                // Get max size from user preferences
+                long maxSizeBytes = (long)PreferencesManager.Current.MaxTableSizeMB * 1024L * 1024L;
+
                 if (totalSizeBytes > maxSizeBytes)
                 {
                     string totalSizeFormatted = FileHelper.FormatFileSize(totalSizeBytes);
+                    string maxSizeFormatted = FileHelper.FormatFileSize(maxSizeBytes);
                     StatusTextBlock.Text = "Folder too large for table mode";
-                    MessageBox.Show($"The total size of parquet files in this folder is {totalSizeFormatted}, which exceeds the 500 MB limit for table mode.\n\nPlease use 'Read All Parquet Files' (streaming mode) or 'Write Custom Query' instead.",
+                    MessageBox.Show($"The total size of parquet files in this folder is {totalSizeFormatted}, which exceeds the {maxSizeFormatted} limit for table mode.\n\nPlease use 'Read All Parquet Files' (streaming mode) or 'Write Custom Query' instead.\n\nYou can change the table mode size limit in Settings (File > Settings).",
                         "Folder Too Large", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
@@ -790,7 +798,7 @@ namespace S3Browser
                     ? _currentBucket
                     : _currentPrefix.TrimEnd('/').Split('/').Last();
 
-                var queryDialog = new QueryEditorDialog(_currentBucket, initialQuery, folderName);
+                var queryDialog = new SqlQueryDialog(_currentBucket, initialQuery, folderName);
                 queryDialog.Show();
             }
             catch (Exception ex)
@@ -913,6 +921,156 @@ namespace S3Browser
         private void ExitMenuItem_Click(object sender, RoutedEventArgs e)
         {
             Application.Current.Shutdown();
+        }
+
+        private void SettingsMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var settingsWindow = new SettingsWindow
+                {
+                    Owner = this
+                };
+
+                if (settingsWindow.ShowDialog() == true)
+                {
+                    // Settings were saved
+                    StatusTextBlock.Text = "Settings updated successfully";
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening settings: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ViewBookmarksMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var bookmarksWindow = new BookmarksWindow(this)
+                {
+                    Owner = this
+                };
+
+                bookmarksWindow.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening bookmarks: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void AddBookmarkMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            AddCurrentLocationToBookmarks();
+        }
+
+        private void BookmarkButton_Click(object sender, RoutedEventArgs e)
+        {
+            AddCurrentLocationToBookmarks();
+        }
+
+        private void AddCurrentLocationToBookmarks()
+        {
+            if (_currentBucket == null)
+            {
+                MessageBox.Show("Please navigate to a location first.", "No Location",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            string s3Path = S3PathTextBox.Text;
+            if (string.IsNullOrEmpty(s3Path))
+            {
+                s3Path = $"s3://{_currentBucket}";
+            }
+
+            // Check if bookmark already exists
+            if (BookmarksManager.BookmarkExists(s3Path))
+            {
+                var result = MessageBox.Show(
+                    $"A bookmark for this location already exists.\n\nDo you want to update it?",
+                    "Bookmark Exists",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+
+                if (result != MessageBoxResult.Yes)
+                {
+                    return;
+                }
+            }
+
+            // Determine actual access mode based on bucket public status
+            // If bucket is public, bookmark as anonymous regardless of current mode
+            bool isPublicBucket = S3Manager.Instance.IsPublicBucket(_currentBucket);
+            bool bookmarkAsAnonymous = isPublicBucket || _isAnonymousMode;
+
+            // Prompt for bookmark name
+            var inputDialog = new BookmarkNameDialog(s3Path)
+            {
+                Owner = this
+            };
+
+            if (inputDialog.ShowDialog() == true)
+            {
+                string bookmarkName = inputDialog.BookmarkName;
+                BookmarksManager.AddBookmark(bookmarkName, s3Path, bookmarkAsAnonymous);
+
+                string accessModeInfo = bookmarkAsAnonymous ? " (anonymous access)" : " (authenticated access)";
+                StatusTextBlock.Text = $"Bookmark '{bookmarkName}' saved{accessModeInfo}";
+                MessageBox.Show($"Bookmark '{bookmarkName}' has been saved.\n\nAccess mode: {(bookmarkAsAnonymous ? "Anonymous" : "Authenticated")}", "Bookmark Saved",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        /// <summary>
+        /// Navigates to a bookmarked location.
+        /// Called from BookmarksWindow when user selects a bookmark.
+        /// </summary>
+        /// <param name="bookmark">The bookmark to navigate to.</param>
+        public async void NavigateToBookmark(Bookmark bookmark)
+        {
+            try
+            {
+                // Only prompt to switch modes if:
+                // 1. Bookmark is private (not anonymous) AND we're in anonymous mode
+                // Public bookmarks are accessible from both modes, so no switch needed
+                if (!bookmark.IsAnonymous && _isAnonymousMode)
+                {
+                    var result = MessageBox.Show(
+                        $"This bookmark requires authenticated access, but you are currently in Anonymous mode.\n\n" +
+                        $"Would you like to switch to Authenticated mode?",
+                        "Authentication Required",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
+
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        // Re-initialize S3Manager with authenticated mode
+                        await InitializeS3ManagerAsync(_currentProfile, false);
+                    }
+                    else
+                    {
+                        return;
+                    }
+                }
+
+                // Set the path in the textbox
+                S3PathTextBox.Text = bookmark.S3Path;
+
+                // Navigate to it
+                NavigateToS3Path();
+
+                StatusTextBlock.Text = $"Navigated to bookmark: {bookmark.Name}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error navigating to bookmark: {ex.Message}", "Navigation Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private async void DownloadFile_Click(object sender, RoutedEventArgs e)
@@ -1260,6 +1418,12 @@ namespace S3Browser
         /// Automatically computed from SizeInBytes.
         /// </summary>
         public string Size => SizeInBytes.HasValue ? FileHelper.FormatFileSize(SizeInBytes.Value) : "--";
+
+        /// <summary>
+        /// Gets whether the file has content (size greater than 0).
+        /// Used to determine if download button should be shown.
+        /// </summary>
+        public bool HasContent => SizeInBytes.HasValue && SizeInBytes.Value > 0;
 
         /// <summary>
         /// Gets or sets the last modified date/time formatted as "yyyy-MM-dd HH:mm" in local time.

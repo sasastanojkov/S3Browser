@@ -307,6 +307,32 @@ namespace S3Browser
             }
         }
 
+        /// <summary>
+        /// Checks if a table exists in the DuckDB connection.
+        /// </summary>
+        /// <param name="connection">The DuckDB connection to check.</param>
+        /// <param name="tableName">The name of the table to check.</param>
+        /// <returns>True if the table exists, false otherwise.</returns>
+        public bool TableExists(DuckDBConnection connection, string tableName)
+        {
+            if (connection == null)
+                throw new ArgumentNullException(nameof(connection));
+
+            try
+            {
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = $"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{tableName}'";
+                    var result = command.ExecuteScalar();
+                    return result != null && Convert.ToInt32(result) > 0;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private byte[] ReadStreamToBytes(System.IO.UnmanagedMemoryStream stream)
         {
             // Reset stream position to beginning
